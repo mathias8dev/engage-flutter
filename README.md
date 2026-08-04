@@ -4,11 +4,15 @@ The official Flutter bridge for the Engage Android and iOS SDKs. It delegates
 storage, synchronization, push, in-app evaluation and Inbox behavior to the
 native SDKs; Dart exposes one idiomatic API and multicast state streams.
 
-The package currently lives in the Engage SDK monorepo and is not published.
-Android resolves the `0.1.0-SNAPSHOT` Engage artifacts from Maven Local. iOS
-uses the sibling `ios` Swift package through a local Swift Package Manager
-dependency. Those local coordinates must be replaced by released artifacts
-before publishing this package outside the monorepo.
+Install the published package from pub.dev:
+
+```shell
+flutter pub add engage_flutter
+```
+
+The plugin pins its Android JitPack modules and its iOS Swift package to the
+same native SDK version. Applications do not need to copy native SDK source
+code into their project.
 
 ## Requirements
 
@@ -17,9 +21,10 @@ before publishing this package outside the monorepo.
 - iOS 15 or newer
 - Flutter Swift Package Manager support enabled for iOS
 
-For local Android development, publish the five native SDK modules first, then
-add `mavenLocal()` to the host App repositories. The example App contains the
-required repository and desugaring setup.
+For local Android bridge development, publish the five native SDK modules with
+the same version to Maven Local first. Maven Local uses the same coordinates
+as JitPack, so no dependency declaration changes are required. The example App
+already contains the repository and desugaring setup.
 
 ```kotlin
 // android/build.gradle.kts
@@ -28,6 +33,7 @@ allprojects {
         mavenLocal()
         google()
         mavenCentral()
+        maven("https://jitpack.io")
     }
 }
 
@@ -55,6 +61,15 @@ await Engage.start(
 `Engage.start` creates the installation and activates the native modules. A
 second call with the same configuration is safe; the native SDK rejects a
 different App identity in the same process.
+
+On Android, the first successful call also persists the validated native
+startup configuration. On later process starts, an Android initialization
+provider restores that configuration and starts the native SDK before a
+Flutter engine or Dart isolate exists. This lets FCM delivery, notification
+display and native event persistence work during a cold background launch.
+The persisted configuration is invalidated when the installed App build
+changes, so the updated App must reach `Engage.start` once before this native
+cold-start path becomes active again.
 
 ## Installation and profile
 
@@ -178,6 +193,20 @@ const PushConfig(
 )
 ```
 
+Rich notifications need the usual iOS Notification Service Extension. Add the
+native SDK's `EngagePushServiceExtension` Swift Package product to that App
+Extension target and use its base class:
+
+```swift
+import EngagePushServiceExtension
+
+final class NotificationService: EngageNotificationServiceExtension {}
+```
+
+Android rich images are handled by the native FCM module. If image download
+fails, both platforms still deliver the standard notification without the
+attachment.
+
 ## In-app experiences
 
 Overlays are rendered automatically by the native SDK. Flutter may pause them
@@ -222,6 +251,14 @@ await registration.cancel();
 
 Actions from push, in-app content and the Engage Message Center use the same
 registry.
+
+On Android, registered Dart action names are persisted alongside the native
+startup configuration. If an action or push event arrives while no Flutter
+engine is attached, the native bridge stores it durably and delivers it when
+Dart registers the action or subscribes to push events. Delivery is removed
+from that queue only after the Dart callback or event sink accepts it. The
+bridge retains at most 64 pending action executions and 32 pending push events;
+if either bound is exceeded, it evicts the oldest entry of that queue.
 
 ## Preference Center
 

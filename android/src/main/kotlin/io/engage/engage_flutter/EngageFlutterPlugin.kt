@@ -11,6 +11,7 @@ import io.flutter.plugin.platform.PlatformView
 import io.flutter.plugin.platform.PlatformViewFactory
 import io.flutter.plugin.common.StandardMessageCodec
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
@@ -86,7 +87,7 @@ public class EngageFlutterPlugin :
                 "events.clearScreen" -> Engage.events.clearScreen()
                 "events.flush" -> Engage.events.flush()
                 "actions.register" -> registerAction(arguments.string("name"))
-                "actions.unregister" -> actions.remove(arguments.string("name"))?.close()
+                "actions.unregister" -> unregisterAction(arguments.string("name"))
                 "sdkFeatures.edit" -> Engage.sdkFeatures.edit {
                     val desired = arguments["enabled"].asList()
                         .map { enumValue<SdkFeature>(it) }
@@ -149,7 +150,10 @@ public class EngageFlutterPlugin :
 
     override fun onListen(arguments: Any?, sink: EventChannel.EventSink) {
         eventSink = sink
-        if (observersStarted) emitCurrentState()
+        if (observersStarted) {
+            emitCurrentState()
+            drainPendingPushEvents()
+        }
     }
 
     override fun onCancel(arguments: Any?) {
@@ -162,13 +166,21 @@ public class EngageFlutterPlugin :
         eventSink = null
         actions.values.forEach { runCatching { it.close() } }
         actions.clear()
+        if (::applicationContext.isInitialized && Engage.state.value is EngageLifecycle.Started) {
+            EngageFlutterStartup.installBackgroundActionHandlers(applicationContext)
+            EngageFlutterStartup.installBackgroundPushBuffer(applicationContext)
+        }
         pagers.values.forEach(PagerRegistration::close)
         pagers.clear()
         scope.cancel()
     }
 
     private fun start(arguments: FlutterMap) {
-        Engage.start(applicationContext, arguments.toEngageConfig(applicationContext))
+        val config = arguments.toEngageConfig(applicationContext)
+        val wasStarted = Engage.state.value is EngageLifecycle.Started
+        Engage.start(applicationContext, config)
+        EngageFlutterStartup.persist(applicationContext, arguments)
+        if (!wasStarted) EngageFlutterStartup.installBackgroundActionHandlers(applicationContext)
         if (observersStarted) return
         observersStarted = true
         Engage.inApp.overlays.displayDelegate = overlayDelegate
@@ -186,12 +198,14 @@ public class EngageFlutterPlugin :
         observationJobs += scope.launch {
             Engage.push.status.collect { emit("push.status", it.toFlutter()) }
         }
-        observationJobs += scope.launch {
+        observationJobs += scope.launch(start = CoroutineStart.UNDISPATCHED) {
             Engage.push.events.collect { emit("push.events", it.toFlutter()) }
         }
         observationJobs += scope.launch {
             Engage.messageCenter.inbox.unreadCount.collect { emit("messageCenter.unreadCount", it) }
         }
+        EngageFlutterStartup.stopBackgroundPushBuffer()
+        drainPendingPushEvents()
     }
 
     private fun emitCurrentState() {
@@ -249,16 +263,39 @@ public class EngageFlutterPlugin :
         requireNotNull(pagers[arguments.string("pagerId")]?.pager) { "Unknown Inbox pager" }
 
     private fun registerAction(name: String) {
+        EngageFlutterStartup.rememberAction(applicationContext, name)
         actions.remove(name)?.close()
         actions[name] = Engage.actions.register(name) { action ->
-            val response = invokeDart(
-                "actions.execute",
-                mapOf(
-                    "name" to action.name,
-                    "arguments" to action.arguments.asJson().toFlutter(),
-                ),
-            )
-            if (response == "COMPLETED") ActionResult.COMPLETED else ActionResult.REJECTED
+            if (executeDartAction(action.name, action.arguments.asJson().toFlutter())) {
+                ActionResult.COMPLETED
+            } else {
+                ActionResult.REJECTED
+            }
+        }
+        scope.launch {
+            EngageFlutterStartup.pendingActions(applicationContext, name).forEach { pending ->
+                if (executeDartAction(pending.name, pending.arguments.toFlutter())) {
+                    EngageFlutterStartup.acknowledgeAction(applicationContext, pending.id)
+                }
+            }
+        }
+    }
+
+    private fun unregisterAction(name: String) {
+        actions.remove(name)?.close()
+        EngageFlutterStartup.forgetAction(applicationContext, name)
+    }
+
+    private suspend fun executeDartAction(name: String, arguments: Any?): Boolean = invokeDart(
+        "actions.execute",
+        mapOf("name" to name, "arguments" to arguments),
+    ) == "COMPLETED"
+
+    private fun drainPendingPushEvents() {
+        if (eventSink == null) return
+        EngageFlutterStartup.pendingPushEvents(applicationContext).forEach { pending ->
+            emit("push.events", pending.event)
+            EngageFlutterStartup.acknowledgePushEvent(applicationContext, pending.id)
         }
     }
 

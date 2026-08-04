@@ -1,0 +1,57 @@
+name: Publish to pub.dev
+
+on:
+  push:
+    tags: ['*.*.*']
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      already-published: ${{ steps.pub-version.outputs.already-published }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: jdx/mise-action@v3
+        with:
+          cache: true
+      - name: Validate tag and package versions
+        run: ./scripts/validate-version.sh "$GITHUB_REF_NAME"
+      - run: mise run package:check
+      - name: Check whether this version already exists on pub.dev
+        id: pub-version
+        run: |
+          status="$(curl --silent --show-error --location --write-out '%{http_code}' https://pub.dev/api/packages/engage_flutter --output /tmp/pub-package.json)"
+          if [[ "$status" == "404" ]]; then
+            echo "The first version must be published with 'mise run publish:first $GITHUB_REF_NAME' before pushing its tag." >&2
+            exit 1
+          fi
+          [[ "$status" == "200" ]] || { echo "pub.dev returned HTTP $status." >&2; exit 1; }
+          if jq --exit-status --arg version "$GITHUB_REF_NAME" '.versions[]?.version == $version' /tmp/pub-package.json >/dev/null 2>&1; then
+            echo "already-published=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "already-published=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  publish:
+    needs: validate
+    if: needs.validate.outputs.already-published != 'true'
+    permissions:
+      id-token: write
+    uses: dart-lang/setup-dart/.github/workflows/publish.yml@v1
+    with:
+      environment: pub.dev
+
+  release:
+    needs: [validate, publish]
+    if: ${{ always() && needs.validate.result == 'success' && (needs.publish.result == 'success' || needs.publish.result == 'skipped') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || gh release create "$GITHUB_REF_NAME" --verify-tag --generate-notes --title "$GITHUB_REF_NAME"

@@ -3,6 +3,9 @@ allprojects {
         mavenLocal()
         google()
         mavenCentral()
+        maven("https://jitpack.io") {
+            content { includeGroup("com.github.mathias8dev") }
+        }
     }
 }
 

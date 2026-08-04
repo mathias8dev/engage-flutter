@@ -1,1 +1,11 @@
-<manifest />
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <!-- Optional native SDK modules register at initOrder 80+. This provider runs afterwards
+             and restores the last validated Flutter configuration before a background FCM service. -->
+        <provider
+            android:name="io.engage.engage_flutter.EngageFlutterInitProvider"
+            android:authorities="${applicationId}.engage-flutter-init"
+            android:exported="false"
+            android:initOrder="1" />
+    </application>
+</manifest>

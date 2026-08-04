@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+blocked_path="ios/engage_flutter/.engage-local"
+
+if git diff --cached --name-only --diff-filter=ACMR | grep -Fqx "$blocked_path"; then
+  echo "Commit blocked: $blocked_path is a machine-local SwiftPM override." >&2
+  echo "Remove it from the index before committing." >&2
+  exit 1
+fi

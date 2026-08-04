@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.0
+## 2.1.0
 
 - Add the complete Engage Flutter facade for Android and iOS.
 - Bridge installation, profile, events, actions, feature flags, preferences,
