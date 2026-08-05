@@ -16,6 +16,7 @@ void main() {
       config: const EngageConfig(
         appKey: 'eng_app_test',
         endpoint: 'https://edge.example.test/v1/',
+        logLevel: EngageLogLevel.warning,
       ),
     );
 
@@ -24,6 +25,10 @@ void main() {
     expect(
       platform.invocations.single.arguments,
       containsPair('appKey', 'eng_app_test'),
+    );
+    expect(
+      platform.invocations.single.arguments,
+      containsPair('logLevel', 'WARNING'),
     );
   });
 

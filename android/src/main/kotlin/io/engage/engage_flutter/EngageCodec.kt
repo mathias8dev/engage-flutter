@@ -8,6 +8,7 @@ import io.engage.sdk.AndroidPushConfig
 import io.engage.sdk.AndroidPushSound
 import io.engage.sdk.EmbeddedPresentation
 import io.engage.sdk.EngageConfig
+import io.engage.sdk.EngageLogLevel
 import io.engage.sdk.InAppContent
 import io.engage.sdk.InboxEntry
 import io.engage.sdk.InboxError
@@ -37,6 +38,9 @@ internal fun Any?.asMap(): FlutterMap = (this as? Map<*, *>)
     ?.associate { (key, value) -> key.toString() to value }
     ?: error("Expected a map, got ${this?.javaClass?.name}")
 
+internal fun Any?.asMapOrEmpty(): FlutterMap =
+    if (this == null) emptyMap() else asMap()
+
 internal fun Any?.asList(): List<Any?> = (this as? List<*>)?.toList().orEmpty()
 
 internal inline fun <reified T : Enum<T>> enumValue(raw: Any?): T = enumValueOf(raw as String)
@@ -54,6 +58,10 @@ internal fun FlutterMap.toEngageConfig(context: Context): EngageConfig {
     return EngageConfig(
         appKey = string("appKey"),
         endpoint = URI.create(string("endpoint")),
+        logLevel = when (val raw = this["logLevel"] as? String ?: "INFO") {
+            "WARNING" -> EngageLogLevel.WARN
+            else -> enumValue(raw)
+        },
         push = PushConfig(
             foregroundPresentation = enumValue(push["foregroundPresentation"]),
             android = push["android"]?.asMap()?.toAndroidPushConfig(context),

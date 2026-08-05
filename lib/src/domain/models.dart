@@ -1,5 +1,7 @@
 typedef JsonMap = Map<String, Object?>;
 
+enum EngageLogLevel { verbose, debug, info, warning, error, none }
+
 enum ForegroundPresentation { show, silent }
 
 enum NotificationImportance { min, low, defaultImportance, high, max }
@@ -128,11 +130,13 @@ final class EngageConfig {
     required this.appKey,
     this.endpoint = 'https://api.engage.io/v1/',
     this.push = const PushConfig(),
+    this.logLevel = EngageLogLevel.info,
   });
 
   final String appKey;
   final String endpoint;
   final PushConfig push;
+  final EngageLogLevel logLevel;
 }
 
 enum EngageLifecycle { notStarted, started }

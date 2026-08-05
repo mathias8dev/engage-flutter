@@ -1,12 +1,16 @@
 package io.engage.engage_flutter
 
 import android.content.Context
+import android.content.Intent
 import android.view.View
 import io.engage.sdk.*
 import io.flutter.embedding.engine.plugins.FlutterPlugin
+import io.flutter.embedding.engine.plugins.activity.ActivityAware
+import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
+import io.flutter.plugin.common.PluginRegistry.NewIntentListener
 import io.flutter.plugin.platform.PlatformView
 import io.flutter.plugin.platform.PlatformViewFactory
 import io.flutter.plugin.common.StandardMessageCodec
@@ -27,6 +31,8 @@ import kotlin.coroutines.resume
 
 public class EngageFlutterPlugin :
     FlutterPlugin,
+    ActivityAware,
+    NewIntentListener,
     MethodChannel.MethodCallHandler,
     EventChannel.StreamHandler {
     private lateinit var applicationContext: Context
@@ -42,6 +48,7 @@ public class EngageFlutterPlugin :
     private val pendingOverlayDecisions = ConcurrentHashMap.newKeySet<String>()
     private var eventSink: EventChannel.EventSink? = null
     private var observersStarted = false
+    private var activityBinding: ActivityPluginBinding? = null
 
     private val overlayDelegate = InAppOverlayDisplayDelegate { candidate ->
         val key = candidate.identity()
@@ -52,6 +59,7 @@ public class EngageFlutterPlugin :
     }
 
     override fun onAttachedToEngine(binding: FlutterPlugin.FlutterPluginBinding) {
+        EngageLogger.info("Flutter", "Android plugin attaching to engine")
         applicationContext = binding.applicationContext
         methods = MethodChannel(binding.binaryMessenger, METHODS_CHANNEL)
         events = EventChannel(binding.binaryMessenger, EVENTS_CHANNEL)
@@ -61,11 +69,14 @@ public class EngageFlutterPlugin :
             IN_APP_VIEW,
             EngageInAppViewFactory(),
         )
+        EngageLogger.info("Flutter", "Android plugin attached channelsReady=true")
     }
 
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
-        launch(result) {
-            val arguments = call.arguments.asMap()
+        val argumentKeys = (call.arguments as? Map<*, *>)?.keys?.map(Any?::toString)?.sorted().orEmpty()
+        EngageLogger.verbose("Flutter", "method received name=${call.method} argumentKeys=$argumentKeys")
+        launch(result, call.method) {
+            val arguments = call.arguments.asMapOrEmpty()
             when (call.method) {
                 "start" -> start(arguments)
                 "installation.issueBindingCode" -> Engage.installation.issueBindingCode()
@@ -148,7 +159,30 @@ public class EngageFlutterPlugin :
         }
     }
 
+    override fun onAttachedToActivity(binding: ActivityPluginBinding) {
+        activityBinding = binding
+        binding.addOnNewIntentListener(this)
+        EngageLogger.debug("Flutter", "Activity attached newIntentListener=true")
+    }
+
+    override fun onDetachedFromActivityForConfigChanges() = detachFromActivity()
+
+    override fun onReattachedToActivityForConfigChanges(binding: ActivityPluginBinding) = onAttachedToActivity(binding)
+
+    override fun onDetachedFromActivity() = detachFromActivity()
+
+    override fun onNewIntent(intent: Intent): Boolean {
+        if (Engage.state.value !is EngageLifecycle.Started) {
+            EngageLogger.debug("Flutter", "new intent deferred reason=sdk_not_started")
+            return false
+        }
+        val handled = Engage.push.handleOpenIntent(intent)
+        EngageLogger.debug("Flutter", "new intent processed engage=$handled")
+        return handled
+    }
+
     override fun onListen(arguments: Any?, sink: EventChannel.EventSink) {
+        EngageLogger.debug("Flutter", "event listener attached observersStarted=$observersStarted")
         eventSink = sink
         if (observersStarted) {
             emitCurrentState()
@@ -157,10 +191,12 @@ public class EngageFlutterPlugin :
     }
 
     override fun onCancel(arguments: Any?) {
+        EngageLogger.debug("Flutter", "event listener detached")
         eventSink = null
     }
 
     override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
+        EngageLogger.info("Flutter", "Android plugin detaching from engine")
         methods.setMethodCallHandler(null)
         events.setStreamHandler(null)
         eventSink = null
@@ -173,9 +209,17 @@ public class EngageFlutterPlugin :
         pagers.values.forEach(PagerRegistration::close)
         pagers.clear()
         scope.cancel()
+        EngageLogger.info("Flutter", "Android plugin detached")
+    }
+
+    private fun detachFromActivity() {
+        activityBinding?.removeOnNewIntentListener(this)
+        activityBinding = null
+        EngageLogger.debug("Flutter", "Activity detached newIntentListener=false")
     }
 
     private fun start(arguments: FlutterMap) {
+        EngageLogger.debug("Flutter", "start bridge decoding configuration keys=${arguments.keys.sorted()}")
         val config = arguments.toEngageConfig(applicationContext)
         val wasStarted = Engage.state.value is EngageLifecycle.Started
         Engage.start(applicationContext, config)
@@ -206,9 +250,14 @@ public class EngageFlutterPlugin :
         }
         EngageFlutterStartup.stopBackgroundPushBuffer()
         drainPendingPushEvents()
+        EngageLogger.info(
+            "Flutter",
+            "start bridge ready installationId=${Engage.installation.id.value} observersStarted=$observersStarted",
+        )
     }
 
     private fun emitCurrentState() {
+        EngageLogger.debug("Flutter", "current state replay started")
         emit("installation.id", Engage.installation.id.value)
         emit("sdkFeatures.enabled", Engage.sdkFeatures.enabled.value.map(SdkFeature::name))
         emit("privacy.state", Engage.privacy.state.value.name)
@@ -228,11 +277,16 @@ public class EngageFlutterPlugin :
         pagers.forEach { (id, registration) ->
             emit("messageCenter.pager", registration.pager.state.value.toFlutter(), id)
         }
+        EngageLogger.debug("Flutter", "current state replay finished")
     }
 
     private fun observePreferenceCenter(key: String?) {
         val scopeKey = key.orEmpty()
-        if (centerJobs.containsKey(scopeKey)) return
+        if (centerJobs.containsKey(scopeKey)) {
+            EngageLogger.verbose("Flutter", "preference center observation reused key=$scopeKey")
+            return
+        }
+        EngageLogger.debug("Flutter", "preference center observation started key=$scopeKey")
         val state = key?.let(Engage.preferenceCenter::center) ?: Engage.preferenceCenter.center()
         centerJobs[scopeKey] = scope.launch {
             state.collect { emit("preferenceCenter.center", it?.toFlutter(), scopeKey) }
@@ -240,14 +294,22 @@ public class EngageFlutterPlugin :
     }
 
     private fun observePlacement(key: String) {
-        if (placementJobs.containsKey(key)) return
+        if (placementJobs.containsKey(key)) {
+            EngageLogger.verbose("Flutter", "in-app placement observation reused key=$key")
+            return
+        }
+        EngageLogger.debug("Flutter", "in-app placement observation started key=$key")
         placementJobs[key] = scope.launch {
             Engage.inApp.placement(key).collect { emit("inApp.placement", it?.toFlutter(), key) }
         }
     }
 
     private fun createPager(id: String, pageSize: Int) {
-        if (pagers.containsKey(id)) return
+        if (pagers.containsKey(id)) {
+            EngageLogger.verbose("Flutter", "message center pager reused id=$id")
+            return
+        }
+        EngageLogger.debug("Flutter", "message center pager created id=$id pageSize=$pageSize")
         val inboxPager = Engage.messageCenter.inbox.pager(pageSize)
         val job = scope.launch {
             inboxPager.state.collect { emit("messageCenter.pager", it.toFlutter(), id) }
@@ -256,13 +318,16 @@ public class EngageFlutterPlugin :
     }
 
     private fun closePager(id: String) {
-        pagers.remove(id)?.close()
+        val removed = pagers.remove(id)
+        removed?.close()
+        EngageLogger.debug("Flutter", "message center pager closed id=$id existed=${removed != null}")
     }
 
     private fun pager(arguments: FlutterMap): InboxPager =
         requireNotNull(pagers[arguments.string("pagerId")]?.pager) { "Unknown Inbox pager" }
 
     private fun registerAction(name: String) {
+        EngageLogger.debug("Flutter", "Dart action registration started name=$name")
         EngageFlutterStartup.rememberAction(applicationContext, name)
         actions.remove(name)?.close()
         actions[name] = Engage.actions.register(name) { action ->
@@ -273,17 +338,22 @@ public class EngageFlutterPlugin :
             }
         }
         scope.launch {
-            EngageFlutterStartup.pendingActions(applicationContext, name).forEach { pending ->
+            val pendingActions = EngageFlutterStartup.pendingActions(applicationContext, name)
+            EngageLogger.debug("Flutter", "pending Dart actions draining name=$name count=${pendingActions.size}")
+            pendingActions.forEach { pending ->
                 if (executeDartAction(pending.name, pending.arguments.toFlutter())) {
                     EngageFlutterStartup.acknowledgeAction(applicationContext, pending.id)
                 }
             }
         }
+        EngageLogger.info("Flutter", "Dart action registered name=$name")
     }
 
     private fun unregisterAction(name: String) {
-        actions.remove(name)?.close()
+        val removed = actions.remove(name)
+        removed?.close()
         EngageFlutterStartup.forgetAction(applicationContext, name)
+        EngageLogger.info("Flutter", "Dart action unregistered name=$name existed=${removed != null}")
     }
 
     private suspend fun executeDartAction(name: String, arguments: Any?): Boolean = invokeDart(
@@ -292,14 +362,24 @@ public class EngageFlutterPlugin :
     ) == "COMPLETED"
 
     private fun drainPendingPushEvents() {
-        if (eventSink == null) return
-        EngageFlutterStartup.pendingPushEvents(applicationContext).forEach { pending ->
+        if (eventSink == null) {
+            EngageLogger.verbose("Flutter", "pending push drain deferred reason=no_listener")
+            return
+        }
+        val pendingEvents = EngageFlutterStartup.pendingPushEvents(applicationContext)
+        EngageLogger.debug("Flutter", "pending push drain started count=${pendingEvents.size}")
+        pendingEvents.forEach { pending ->
             emit("push.events", pending.event)
             EngageFlutterStartup.acknowledgePushEvent(applicationContext, pending.id)
         }
+        EngageLogger.debug("Flutter", "pending push drain finished count=${pendingEvents.size}")
     }
 
     private fun requestOverlayDecision(key: String, candidate: InAppContent) {
+        EngageLogger.debug(
+            "Flutter",
+            "overlay decision requested experienceId=${candidate.experienceId} messageId=${candidate.messageId}",
+        )
         scope.launch {
             val response = invokeDart(
                 "inApp.overlays.decide",
@@ -309,6 +389,10 @@ public class EngageFlutterPlugin :
                 .getOrDefault(DisplayDecision.ALLOW)
             pendingOverlayDecisions.remove(key)
             Engage.inApp.overlays.displayDelegate = overlayDelegate
+            EngageLogger.debug(
+                "Flutter",
+                "overlay decision received experienceId=${candidate.experienceId} decision=${overlayDecisions[key]}",
+            )
         }
     }
 
@@ -317,12 +401,15 @@ public class EngageFlutterPlugin :
             suspendCancellableCoroutine { continuation ->
                 methods.invokeMethod(method, arguments, object : MethodChannel.Result {
                     override fun success(result: Any?) {
+                        EngageLogger.verbose("Flutter", "Dart callback succeeded method=$method")
                         if (continuation.isActive) continuation.resume(result as? String)
                     }
                     override fun error(code: String, message: String?, details: Any?) {
+                        EngageLogger.warn("Flutter", "Dart callback failed method=$method code=$code")
                         if (continuation.isActive) continuation.resume(null)
                     }
                     override fun notImplemented() {
+                        EngageLogger.warn("Flutter", "Dart callback not implemented method=$method")
                         if (continuation.isActive) continuation.resume(null)
                     }
                 })
@@ -330,6 +417,10 @@ public class EngageFlutterPlugin :
         }
 
     private fun emit(key: String, value: Any?, scopeKey: String? = null) {
+        EngageLogger.verbose(
+            "Flutter",
+            "event emitted key=$key scope=${scopeKey.orEmpty()} valueType=${value?.javaClass?.simpleName ?: "null"}",
+        )
         eventSink?.success(
             buildMap {
                 put("key", key)
@@ -339,15 +430,22 @@ public class EngageFlutterPlugin :
         )
     }
 
-    private fun launch(result: MethodChannel.Result, block: suspend () -> Any?) {
+    private fun launch(result: MethodChannel.Result, method: String, block: suspend () -> Any?) {
         scope.launch {
+            val startedAt = System.nanoTime()
             try {
                 when (val value = block()) {
-                    NotImplemented -> result.notImplemented()
+                    NotImplemented -> {
+                        EngageLogger.warn("Flutter", "method not implemented name=$method")
+                        result.notImplemented()
+                    }
                     Unit -> result.success(null)
                     else -> result.success(value)
                 }
+                val durationMillis = (System.nanoTime() - startedAt) / 1_000_000
+                EngageLogger.verbose("Flutter", "method completed name=$method durationMs=$durationMillis")
             } catch (failure: Throwable) {
+                EngageLogger.error("Flutter", "method failed name=$method", failure)
                 result.error(
                     "ENGAGE_${failure.javaClass.simpleName.uppercase()}",
                     failure.message ?: failure.toString(),
@@ -432,10 +530,13 @@ private fun InAppContent.identity(): String =
 private class EngageInAppViewFactory : PlatformViewFactory(StandardMessageCodec.INSTANCE) {
     override fun create(context: Context, viewId: Int, arguments: Any?): PlatformView {
         val key = arguments.asMap().string("key")
+        EngageLogger.debug("Flutter", "in-app platform view created viewId=$viewId placementKey=$key")
         return object : PlatformView {
             private val content = EngageInAppView(context).apply { placementKey = key }
             override fun getView(): View = content
-            override fun dispose() = Unit
+            override fun dispose() {
+                EngageLogger.debug("Flutter", "in-app platform view disposed viewId=$viewId placementKey=$key")
+            }
         }
     }
 }

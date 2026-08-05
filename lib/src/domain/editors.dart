@@ -1,4 +1,5 @@
 import 'models.dart';
+import 'engage_logging.dart';
 
 final RegExp _keyPattern = RegExp(r'^[a-z][a-z0-9_.-]{0,127}$');
 final RegExp _eventPattern = RegExp(r'^[a-z][a-z0-9_]{1,63}$');
@@ -7,6 +8,7 @@ void validateProductKey(String key, {String label = 'Key'}) {
   if (!_keyPattern.hasMatch(key)) {
     throw ArgumentError.value(key, label, 'must be a lowercase product key');
   }
+  EngageLog.verbose('Editor', 'product key validated label=$label key=$key');
 }
 
 void validateEventName(String name) {
@@ -17,6 +19,7 @@ void validateEventName(String name) {
       'must match ${_eventPattern.pattern}',
     );
   }
+  EngageLog.verbose('Editor', 'event name validated name=$name');
 }
 
 Object? _wireValue(Object? value) {
@@ -49,12 +52,17 @@ final class AttributeEditor {
     validateProductKey(key, label: 'attribute key');
     _removals.remove(key);
     _values[key] = _wireValue(value);
+    EngageLog.verbose(
+      'Editor',
+      'attribute set key=$key type=${_valueType(value)}',
+    );
   }
 
   void remove(String key) {
     validateProductKey(key, label: 'attribute key');
     _values.remove(key);
     _removals.add(key);
+    EngageLog.verbose('Editor', 'attribute removed key=$key');
   }
 
   JsonMap toJson() => {
@@ -73,12 +81,14 @@ final class TagEditor {
     _validateTag(tag);
     _removals.remove(tag);
     _additions.add(tag);
+    EngageLog.verbose('Editor', 'tag added length=${tag.length}');
   }
 
   void remove(String tag) {
     _validateTag(tag);
     _additions.remove(tag);
     _removals.add(tag);
+    EngageLog.verbose('Editor', 'tag removed length=${tag.length}');
   }
 
   JsonMap toJson() => {
@@ -107,6 +117,10 @@ final class EventEditor {
   void put(String key, Object? value) {
     validateProductKey(key, label: 'event property key');
     _properties[key] = _wireValue(value);
+    EngageLog.verbose(
+      'Editor',
+      'event property set key=$key type=${_valueType(value)}',
+    );
   }
 
   JsonMap toJson() {
@@ -151,6 +165,10 @@ final class ProfileSubscriptionEditor {
         'channel': _enumWire(channel),
         'subscribed': subscribed,
       };
+      EngageLog.verbose(
+        'Editor',
+        'profile subscription list=$list channel=${channel.name} subscribed=$subscribed',
+      );
     }
   }
 }
@@ -174,6 +192,10 @@ final class InstallationSubscriptionEditor {
   void _edit(String list, {required bool subscribed}) {
     validateProductKey(list, label: 'subscription list');
     _changes[list] = subscribed;
+    EngageLog.verbose(
+      'Editor',
+      'installation subscription list=$list subscribed=$subscribed',
+    );
   }
 }
 
@@ -182,8 +204,16 @@ final class SdkFeatureEditor {
 
   final Set<SdkFeature> _enabled;
 
-  void enable(SdkFeature feature) => _enabled.add(feature);
-  void disable(SdkFeature feature) => _enabled.remove(feature);
+  void enable(SdkFeature feature) {
+    _enabled.add(feature);
+    EngageLog.verbose('Editor', 'feature enabled feature=${feature.name}');
+  }
+
+  void disable(SdkFeature feature) {
+    _enabled.remove(feature);
+    EngageLog.verbose('Editor', 'feature disabled feature=${feature.name}');
+  }
+
   Set<SdkFeature> build() => Set.unmodifiable(_enabled);
 }
 
@@ -197,3 +227,15 @@ String _enumWire(Enum value) {
   );
   return words.toUpperCase();
 }
+
+String _valueType(Object? value) => switch (value) {
+  null => 'null',
+  bool() => 'boolean',
+  int() => 'integer',
+  double() => 'number',
+  String() => 'string',
+  DateTime() => 'date',
+  List() => 'array',
+  Map() => 'object',
+  _ => value.runtimeType.toString(),
+};

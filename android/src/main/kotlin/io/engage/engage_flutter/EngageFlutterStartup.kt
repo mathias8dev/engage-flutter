@@ -7,6 +7,7 @@ import android.database.Cursor
 import android.net.Uri
 import io.engage.sdk.Engage
 import io.engage.sdk.EngageConfig
+import io.engage.sdk.EngageLogger
 import io.engage.sdk.ActionResult
 import io.engage.sdk.push
 import kotlinx.coroutines.CoroutineScope
@@ -36,6 +37,7 @@ internal object EngageFlutterStartup {
     private var pushEventJob: Job? = null
 
     fun persist(context: Context, arguments: FlutterMap) {
+        EngageLogger.debug("FlutterStartup", "startup configuration persistence started keys=${arguments.keys.sorted()}")
         val serialized = JSONObject(arguments.mapValues { (_, value) -> value.toJsonValue() }).toString()
         check(
             context.getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE).edit()
@@ -43,19 +45,26 @@ internal object EngageFlutterStartup {
                 .putLong(INSTALLED_AT, context.installedAt())
                 .commit(),
         ) { "Could not persist the Engage Flutter startup configuration" }
+        EngageLogger.debug("FlutterStartup", "startup configuration persisted")
     }
 
     fun restore(context: Context): EngageConfig? {
         val preferences = context.getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE)
-        val serialized = preferences.getString(CONFIGURATION, null) ?: return null
+        val serialized = preferences.getString(CONFIGURATION, null) ?: run {
+            EngageLogger.debug("FlutterStartup", "startup configuration absent")
+            return null
+        }
         if (preferences.getLong(INSTALLED_AT, Long.MIN_VALUE) != context.installedAt()) {
             preferences.edit().remove(CONFIGURATION).remove(INSTALLED_AT).commit()
+            EngageLogger.info("FlutterStartup", "startup configuration cleared reason=application_updated")
             return null
         }
         return runCatching {
             JSONObject(serialized).toFlutterMap().toEngageConfig(context)
+                .also { EngageLogger.debug("FlutterStartup", "startup configuration restored") }
         }.getOrElse {
             preferences.edit().remove(CONFIGURATION).remove(INSTALLED_AT).commit()
+            EngageLogger.warn("FlutterStartup", "startup configuration cleared reason=decode_failure", it)
             null
         }
     }
@@ -67,6 +76,7 @@ internal object EngageFlutterStartup {
         check(preferences.edit().putStringSet(REGISTERED_ACTIONS, names).commit()) {
             "Could not persist the Engage Flutter action registry"
         }
+        EngageLogger.debug("FlutterStartup", "background action remembered name=$name count=${names.size}")
     }
 
     @Synchronized
@@ -82,6 +92,7 @@ internal object EngageFlutterStartup {
                 .commit(),
         ) { "Could not remove the Engage Flutter action registration" }
         backgroundActionRegistrations.remove(name)?.close()
+        EngageLogger.debug("FlutterStartup", "background action forgotten name=$name pendingRemoved=${pending.size}")
     }
 
     @Synchronized
@@ -90,6 +101,7 @@ internal object EngageFlutterStartup {
         backgroundActionRegistrations.clear()
         val names = context.getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE)
             .getStringSet(REGISTERED_ACTIONS, emptySet()).orEmpty()
+        EngageLogger.debug("FlutterStartup", "background action handlers installing count=${names.size}")
         names.forEach { name ->
             backgroundActionRegistrations[name] = Engage.actions.register(name) { action ->
                 if (enqueuePendingAction(context, name, action.arguments.asJson())) {
@@ -99,10 +111,12 @@ internal object EngageFlutterStartup {
                 }
             }
         }
+        EngageLogger.debug("FlutterStartup", "background action handlers installed count=${names.size}")
     }
 
     @Synchronized
     fun installBackgroundPushBuffer(context: Context) {
+        EngageLogger.debug("FlutterStartup", "background push buffer starting")
         pushEventJob?.cancel()
         pushEventJob = backgroundScope.launch(start = CoroutineStart.UNDISPATCHED) {
             Engage.push.events.collect { event -> enqueuePushEvent(context, event.toFlutter()) }
@@ -113,6 +127,7 @@ internal object EngageFlutterStartup {
     fun stopBackgroundPushBuffer() {
         pushEventJob?.cancel()
         pushEventJob = null
+        EngageLogger.debug("FlutterStartup", "background push buffer stopped")
     }
 
     @Synchronized
@@ -129,6 +144,7 @@ internal object EngageFlutterStartup {
         check(preferences.edit().putString(PENDING_ACTIONS, remaining.toActionJson().toString()).commit()) {
             "Could not acknowledge the Engage Flutter action"
         }
+        EngageLogger.verbose("FlutterStartup", "pending action acknowledged id=$id remaining=${remaining.size}")
     }
 
     @Synchronized
@@ -137,7 +153,12 @@ internal object EngageFlutterStartup {
         val pending = readPending(preferences.getString(PENDING_ACTIONS, null)).toMutableList()
         pending += PendingFlutterAction(UUID.randomUUID().toString(), name, arguments)
         while (pending.size > MAX_PENDING_ACTIONS) pending.removeAt(0)
-        return preferences.edit().putString(PENDING_ACTIONS, pending.toActionJson().toString()).commit()
+        val persisted = preferences.edit().putString(PENDING_ACTIONS, pending.toActionJson().toString()).commit()
+        EngageLogger.debug(
+            "FlutterStartup",
+            "pending action enqueued name=$name argumentKeys=${arguments.keys.sorted()} count=${pending.size} persisted=$persisted",
+        )
+        return persisted
     }
 
     @Synchronized
@@ -153,6 +174,7 @@ internal object EngageFlutterStartup {
         check(preferences.edit().putString(PENDING_PUSH_EVENTS, remaining.toPushEventJson().toString()).commit()) {
             "Could not acknowledge the Engage Flutter push event"
         }
+        EngageLogger.verbose("FlutterStartup", "pending push event acknowledged id=$id remaining=${remaining.size}")
     }
 
     @Synchronized
@@ -161,7 +183,12 @@ internal object EngageFlutterStartup {
         val pending = readPendingPushEvents(preferences.getString(PENDING_PUSH_EVENTS, null)).toMutableList()
         pending += PendingFlutterPushEvent(UUID.randomUUID().toString(), event)
         while (pending.size > MAX_PENDING_PUSH_EVENTS) pending.removeAt(0)
-        return preferences.edit().putString(PENDING_PUSH_EVENTS, pending.toPushEventJson().toString()).commit()
+        val persisted = preferences.edit().putString(PENDING_PUSH_EVENTS, pending.toPushEventJson().toString()).commit()
+        EngageLogger.debug(
+            "FlutterStartup",
+            "pending push event enqueued eventKeys=${event.keys.sorted()} count=${pending.size} persisted=$persisted",
+        )
+        return persisted
     }
 
     private fun Context.installedAt(): Long = packageManager.getPackageInfo(packageName, 0).lastUpdateTime
@@ -170,10 +197,16 @@ internal object EngageFlutterStartup {
 public class EngageFlutterInitProvider : ContentProvider() {
     override fun onCreate(): Boolean {
         val application = context?.applicationContext ?: return false
+        EngageLogger.debug("FlutterStartup", "Android startup provider created")
         EngageFlutterStartup.restore(application)?.let { config ->
+            EngageLogger.info("FlutterStartup", "automatic SDK startup beginning")
             Engage.start(application, config)
             EngageFlutterStartup.installBackgroundActionHandlers(application)
             EngageFlutterStartup.installBackgroundPushBuffer(application)
+            EngageLogger.info(
+                "FlutterStartup",
+                "automatic SDK startup complete installationId=${Engage.installation.id.value}",
+            )
         }
         return true
     }

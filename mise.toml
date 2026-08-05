@@ -15,12 +15,13 @@ description = "Resolve Flutter dependencies"
 run = "flutter pub get"
 
 [tasks.check]
-description = "Format-check, analyze, and test the Flutter package"
+description = "Format-check, analyze, and test the Flutter and native Android bridges"
 depends = ["bootstrap"]
 run = [
     "dart format --output=none --set-exit-if-changed lib test example/lib",
     "flutter analyze",
     "flutter test",
+    "cd example/android && ./gradlew :engage_flutter:testDebugUnitTest -PengageUseLocalAndroidSdk=true",
 ]
 
 [tasks."package:check"]

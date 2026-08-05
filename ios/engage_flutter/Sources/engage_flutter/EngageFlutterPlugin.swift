@@ -30,6 +30,7 @@ public final class EngageFlutterPlugin: NSObject, FlutterPlugin, FlutterStreamHa
   }
 
   public static func register(with registrar: FlutterPluginRegistrar) {
+    EngageLogger.info("Flutter", "iOS plugin registering")
     let methods = FlutterMethodChannel(
       name: "io.engage.flutter/methods",
       binaryMessenger: registrar.messenger()
@@ -46,6 +47,7 @@ public final class EngageFlutterPlugin: NSObject, FlutterPlugin, FlutterStreamHa
       EngageInAppViewFactory(),
       withId: "io.engage.flutter/in_app_placement"
     )
+    EngageLogger.info("Flutter", "iOS plugin registered channelsReady=true")
   }
 
   init(methods: FlutterMethodChannel) {
@@ -55,42 +57,74 @@ public final class EngageFlutterPlugin: NSObject, FlutterPlugin, FlutterStreamHa
 
   public func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
     Task { @MainActor in
+      let startedAt = DispatchTime.now().uptimeNanoseconds
+      let argumentKeys = ((call.arguments as? FlutterMap)?.keys.sorted()) ?? []
+      EngageLogger.verbose(
+        "Flutter",
+        "method received name=\(call.method) argumentKeys=\(argumentKeys)"
+      )
+      defer {
+        let durationMilliseconds = (DispatchTime.now().uptimeNanoseconds - startedAt) / 1_000_000
+        EngageLogger.verbose(
+          "Flutter",
+          "method completed name=\(call.method) durationMs=\(durationMilliseconds)"
+        )
+      }
       do {
         let arguments = call.arguments as? FlutterMap ?? [:]
         switch call.method {
         case "start":
+          EngageLogger.debug("Flutter", "start bridge decoding configuration keys=\(arguments.keys.sorted())")
           Engage.start(config: try engageConfig(arguments))
           startObserversIfNeeded()
+          EngageLogger.info(
+            "Flutter",
+            "start bridge ready installationId=\(Engage.installation.id.value) observersStarted=\(started)"
+          )
           result(nil)
         case "installation.issueBindingCode":
           result(try await Engage.installation.issueBindingCode())
         case "installation.editAttributes":
-          Engage.installation.editAttributes { try? applyAttributes(arguments, editor: &$0) }
+          var editor = AttributeEditor()
+          try applyAttributes(arguments, editor: &editor)
+          let decodedEditor = editor
+          try await Engage.installation.editAttributes { $0 = decodedEditor }
           result(nil)
         case "installation.editSubscriptions":
-          Engage.installation.editSubscriptions {
-            applyInstallationSubscriptions(arguments, editor: &$0)
-          }
+          var editor = InstallationSubscriptionEditor()
+          try applyInstallationSubscriptions(arguments, editor: &editor)
+          let decodedEditor = editor
+          try await Engage.installation.editSubscriptions { $0 = decodedEditor }
           result(nil)
         case "profile.editAttributes":
-          Engage.profile.editAttributes { try? applyAttributes(arguments, editor: &$0) }
+          var editor = AttributeEditor()
+          try applyAttributes(arguments, editor: &editor)
+          let decodedEditor = editor
+          try await Engage.profile.editAttributes { $0 = decodedEditor }
           result(nil)
         case "profile.editTags":
-          Engage.profile.editTags { applyTags(arguments, editor: &$0) }
+          var editor = TagEditor()
+          try applyTags(arguments, editor: &editor)
+          let decodedEditor = editor
+          try await Engage.profile.editTags { $0 = decodedEditor }
           result(nil)
         case "profile.editSubscriptions":
-          Engage.profile.editSubscriptions { applyProfileSubscriptions(arguments, editor: &$0) }
+          var editor = ProfileSubscriptionEditor()
+          try applyProfileSubscriptions(arguments, editor: &editor)
+          let decodedEditor = editor
+          try await Engage.profile.editSubscriptions { $0 = decodedEditor }
           result(nil)
         case "events.track":
-          Engage.events.track(try arguments.string("name")) {
-            try? applyEvent(arguments, editor: &$0)
-          }
+          var editor = EventEditor()
+          try applyEvent(arguments, editor: &editor)
+          let decodedEditor = editor
+          try await Engage.events.track(try arguments.string("name")) { $0 = decodedEditor }
           result(nil)
         case "events.trackScreen":
-          Engage.events.trackScreen(try arguments.string("screenKey"))
+          try await Engage.events.trackScreen(try arguments.string("screenKey"))
           result(nil)
         case "events.clearScreen":
-          Engage.events.clearScreen()
+          try await Engage.events.clearScreen()
           result(nil)
         case "events.flush":
           try await Engage.events.flush()
@@ -196,9 +230,11 @@ public final class EngageFlutterPlugin: NSObject, FlutterPlugin, FlutterStreamHa
           await Engage.messageCenter.inbox.delete(InboxEntryId(try arguments.string("entryId")))
           result(nil)
         default:
+          EngageLogger.warning("Flutter", "method not implemented name=\(call.method)")
           result(FlutterMethodNotImplemented)
         }
       } catch {
+        EngageLogger.error("Flutter", "method failed name=\(call.method)", error: error)
         result(FlutterError(
           code: "ENGAGE_\(String(describing: type(of: error)).uppercased())",
           message: String(describing: error),
@@ -212,12 +248,14 @@ public final class EngageFlutterPlugin: NSObject, FlutterPlugin, FlutterStreamHa
     withArguments arguments: Any?,
     eventSink events: @escaping FlutterEventSink
   ) -> FlutterError? {
+    EngageLogger.debug("Flutter", "event listener attached observersStarted=\(started)")
     eventSink = events
     if started { emitCurrentState() }
     return nil
   }
 
   public func onCancel(withArguments arguments: Any?) -> FlutterError? {
+    EngageLogger.debug("Flutter", "event listener detached")
     eventSink = nil
     return nil
   }
@@ -226,7 +264,11 @@ public final class EngageFlutterPlugin: NSObject, FlutterPlugin, FlutterStreamHa
     _ application: UIApplication,
     didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data
   ) {
-    guard started else { return }
+    guard started else {
+      EngageLogger.debug("Flutter", "APNs token callback ignored reason=not_started")
+      return
+    }
+    EngageLogger.debug("Flutter", "APNs token callback forwarded byteCount=\(deviceToken.count)")
     Engage.push.didRegisterForRemoteNotifications(deviceToken: deviceToken)
   }
 
@@ -234,12 +276,20 @@ public final class EngageFlutterPlugin: NSObject, FlutterPlugin, FlutterStreamHa
     _ application: UIApplication,
     didFailToRegisterForRemoteNotificationsWithError error: Error
   ) {
-    guard started else { return }
+    guard started else {
+      EngageLogger.debug("Flutter", "APNs registration failure ignored reason=not_started")
+      return
+    }
+    EngageLogger.warning("Flutter", "APNs registration failure forwarded", error: error)
     Engage.push.didFailToRegisterForRemoteNotifications(error: error)
   }
 
   private func startObserversIfNeeded() {
-    guard !started else { return }
+    guard !started else {
+      EngageLogger.verbose("Flutter", "state observers already started")
+      return
+    }
+    EngageLogger.debug("Flutter", "state observers starting")
     started = true
     Engage.inApp.overlays.displayDelegate = overlayDelegate
     observationTasks = [
@@ -274,9 +324,11 @@ public final class EngageFlutterPlugin: NSObject, FlutterPlugin, FlutterStreamHa
         }
       },
     ]
+    EngageLogger.debug("Flutter", "state observers started count=\(observationTasks.count)")
   }
 
   private func emitCurrentState() {
+    EngageLogger.debug("Flutter", "current state replay started")
     emit(key: "installation.id", value: Engage.installation.id.value)
     emit(key: "sdkFeatures.enabled", value: Engage.sdkFeatures.enabled.value.map(\.rawValue))
     emit(key: "privacy.state", value: Engage.privacy.state.value.rawValue)
@@ -302,11 +354,16 @@ public final class EngageFlutterPlugin: NSObject, FlutterPlugin, FlutterStreamHa
     for (id, registration) in pagers {
       emit(key: "messageCenter.pager", value: flutterPagerState(registration.pager.state.value), scope: id)
     }
+    EngageLogger.debug("Flutter", "current state replay finished")
   }
 
   private func observePreferenceCenter(_ key: String?) {
     let scope = key ?? ""
-    guard centerTasks[scope] == nil else { return }
+    guard centerTasks[scope] == nil else {
+      EngageLogger.verbose("Flutter", "preference center observation reused key=\(scope)")
+      return
+    }
+    EngageLogger.debug("Flutter", "preference center observation started key=\(scope)")
     let state = Engage.preferenceCenter.center(key)
     centerTasks[scope] = Task { [weak self] in
       for await value in state.updates {
@@ -320,7 +377,11 @@ public final class EngageFlutterPlugin: NSObject, FlutterPlugin, FlutterStreamHa
   }
 
   private func observePlacement(_ key: String) {
-    guard placementTasks[key] == nil else { return }
+    guard placementTasks[key] == nil else {
+      EngageLogger.verbose("Flutter", "in-app placement observation reused key=\(key)")
+      return
+    }
+    EngageLogger.debug("Flutter", "in-app placement observation started key=\(key)")
     let state = Engage.inApp.placement(key)
     placementTasks[key] = Task { [weak self] in
       for await value in state.updates {
@@ -334,7 +395,11 @@ public final class EngageFlutterPlugin: NSObject, FlutterPlugin, FlutterStreamHa
   }
 
   private func createPager(id: String, pageSize: Int) {
-    guard pagers[id] == nil else { return }
+    guard pagers[id] == nil else {
+      EngageLogger.verbose("Flutter", "message center pager reused id=\(id)")
+      return
+    }
+    EngageLogger.debug("Flutter", "message center pager created id=\(id) pageSize=\(pageSize)")
     let inboxPager = Engage.messageCenter.inbox.pager(pageSize: pageSize)
     let task = Task { [weak self] in
       for await value in inboxPager.state.updates {
@@ -345,7 +410,9 @@ public final class EngageFlutterPlugin: NSObject, FlutterPlugin, FlutterStreamHa
   }
 
   private func closePager(_ id: String) {
-    pagers.removeValue(forKey: id)?.close()
+    let registration = pagers.removeValue(forKey: id)
+    registration?.close()
+    EngageLogger.debug("Flutter", "message center pager closed id=\(id) existed=\(registration != nil)")
   }
 
   private func pager(_ arguments: FlutterMap) throws -> PagerRegistration {
@@ -357,6 +424,7 @@ public final class EngageFlutterPlugin: NSObject, FlutterPlugin, FlutterStreamHa
   }
 
   private func registerAction(_ name: String) {
+    EngageLogger.debug("Flutter", "Dart action registration started name=\(name)")
     unregisterAction(name)
     actions[name] = Engage.actions.register(name) { [weak self] action in
       guard let self else { return .rejected }
@@ -369,13 +437,20 @@ public final class EngageFlutterPlugin: NSObject, FlutterPlugin, FlutterStreamHa
       ) as? String
       return value == "COMPLETED" ? .completed : .rejected
     }
+    EngageLogger.info("Flutter", "Dart action registered name=\(name)")
   }
 
   private func unregisterAction(_ name: String) {
-    actions.removeValue(forKey: name)?.cancel()
+    let registration = actions.removeValue(forKey: name)
+    registration?.cancel()
+    EngageLogger.info("Flutter", "Dart action unregistered name=\(name) existed=\(registration != nil)")
   }
 
   private func requestOverlayDecision(key: String, candidate: InAppContent) {
+    EngageLogger.debug(
+      "Flutter",
+      "overlay decision requested experienceId=\(candidate.experienceId) messageId=\(candidate.messageId)"
+    )
     Task { [weak self] in
       guard let self else { return }
       let value = await self.invokeDart(
@@ -393,13 +468,22 @@ public final class EngageFlutterPlugin: NSObject, FlutterPlugin, FlutterStreamHa
       self.pendingOverlayDecisions.remove(key)
       self.lock.unlock()
       Engage.inApp.overlays.displayDelegate = self.overlayDelegate
+      EngageLogger.debug(
+        "Flutter",
+        "overlay decision received experienceId=\(candidate.experienceId) decision=\(decision)"
+      )
     }
   }
 
   private func invokeDart(method: String, arguments: Any?) async -> Any? {
+    EngageLogger.verbose("Flutter", "Dart callback invoked method=\(method)")
     await withCheckedContinuation { continuation in
       DispatchQueue.main.async { [methods] in
         methods.invokeMethod(method, arguments: arguments) { value in
+          EngageLogger.verbose(
+            "Flutter",
+            "Dart callback completed method=\(method) resultType=\(String(describing: type(of: value)))"
+          )
           continuation.resume(returning: value)
         }
       }
@@ -408,7 +492,14 @@ public final class EngageFlutterPlugin: NSObject, FlutterPlugin, FlutterStreamHa
 
   private func emit(key: String, value: Any?, scope: String? = nil) {
     let sink = eventSink
-    guard let sink else { return }
+    guard let sink else {
+      EngageLogger.verbose("Flutter", "event not emitted key=\(key) reason=no_listener")
+      return
+    }
+    EngageLogger.verbose(
+      "Flutter",
+      "event emitted key=\(key) scope=\(scope ?? "") valueType=\(String(describing: type(of: value)))"
+    )
     var envelope: FlutterMap = ["key": key, "value": value ?? NSNull()]
     if let scope { envelope["scope"] = scope }
     DispatchQueue.main.async { sink(envelope) }
@@ -432,21 +523,39 @@ private struct PagerRegistration {
 private func applyAttributes(_ arguments: FlutterMap, editor: inout AttributeEditor) throws {
   let values = try arguments.map("set")
   for (key, value) in values { editor.set(key, try jsonValue(value)) }
-  for case let key as String in arguments.list("remove") { editor.remove(key) }
+  for value in arguments.list("remove") {
+    guard let key = value as? String else {
+      throw EngageFlutterCodecError.invalidArgument("Attribute removals must be strings")
+    }
+    editor.remove(key)
+  }
 }
 
-private func applyTags(_ arguments: FlutterMap, editor: inout TagEditor) {
-  for case let tag as String in arguments.list("add") { editor.add(tag) }
-  for case let tag as String in arguments.list("remove") { editor.remove(tag) }
+private func applyTags(_ arguments: FlutterMap, editor: inout TagEditor) throws {
+  for value in arguments.list("add") {
+    guard let tag = value as? String else {
+      throw EngageFlutterCodecError.invalidArgument("Tag additions must be strings")
+    }
+    editor.add(tag)
+  }
+  for value in arguments.list("remove") {
+    guard let tag = value as? String else {
+      throw EngageFlutterCodecError.invalidArgument("Tag removals must be strings")
+    }
+    editor.remove(tag)
+  }
 }
 
 private func applyInstallationSubscriptions(
   _ arguments: FlutterMap,
   editor: inout InstallationSubscriptionEditor
-) {
-  for case let change as FlutterMap in arguments.list("changes") {
-    guard let list = change["list"] as? String else { continue }
-    if change["subscribed"] as? Bool == true { editor.subscribe(list) }
+) throws {
+  for value in arguments.list("changes") {
+    guard let change = value as? FlutterMap else {
+      throw EngageFlutterCodecError.invalidArgument("Installation subscription changes must be maps")
+    }
+    let list = try change.string("list")
+    if try change.bool("subscribed") { editor.subscribe(list) }
     else { editor.unsubscribe(list) }
   }
 }
@@ -454,12 +563,17 @@ private func applyInstallationSubscriptions(
 private func applyProfileSubscriptions(
   _ arguments: FlutterMap,
   editor: inout ProfileSubscriptionEditor
-) {
-  for case let change as FlutterMap in arguments.list("changes") {
-    guard let list = change["list"] as? String,
-          let rawChannel = change["channel"] as? String,
-          let channel = Channel(rawValue: rawChannel) else { continue }
-    if change["subscribed"] as? Bool == true {
+) throws {
+  for value in arguments.list("changes") {
+    guard let change = value as? FlutterMap else {
+      throw EngageFlutterCodecError.invalidArgument("Profile subscription changes must be maps")
+    }
+    let list = try change.string("list")
+    let rawChannel = try change.string("channel")
+    guard let channel = Channel(rawValue: rawChannel) else {
+      throw EngageFlutterCodecError.invalidArgument("Unsupported subscription channel: \(rawChannel)")
+    }
+    if try change.bool("subscribed") {
       editor.subscribe(list, channels: [channel])
     } else {
       editor.unsubscribe(list, channels: [channel])
@@ -470,8 +584,18 @@ private func applyProfileSubscriptions(
 private func applyEvent(_ arguments: FlutterMap, editor: inout EventEditor) throws {
   let properties = try arguments.map("properties")
   for (key, value) in properties { editor.set(key, try jsonValue(value)) }
-  editor.setValue((arguments["value"] as? NSNumber)?.doubleValue)
-  editor.setTransactionId(arguments["transactionId"] as? String)
+  if let value = arguments["value"], !(value is NSNull) {
+    guard let number = value as? NSNumber else {
+      throw EngageFlutterCodecError.invalidArgument("Event value must be a number")
+    }
+    editor.setValue(number.doubleValue)
+  }
+  if let value = arguments["transactionId"], !(value is NSNull) {
+    guard let transactionId = value as? String else {
+      throw EngageFlutterCodecError.invalidArgument("Event transactionId must be a string")
+    }
+    editor.setTransactionId(transactionId)
+  }
 }
 
 private final class EngageInAppViewFactory: NSObject, FlutterPlatformViewFactory {
@@ -480,9 +604,14 @@ private final class EngageInAppViewFactory: NSObject, FlutterPlatformViewFactory
     viewIdentifier viewId: Int64,
     arguments args: Any?
   ) -> FlutterPlatformView {
-    EngageInAppPlatformView(
+    let key = (args as? FlutterMap)?["key"] as? String ?? ""
+    EngageLogger.debug(
+      "Flutter",
+      "in-app platform view created viewId=\(viewId) placementKey=\(key)"
+    )
+    return EngageInAppPlatformView(
       frame: frame,
-      key: (args as? FlutterMap)?["key"] as? String ?? ""
+      key: key
     )
   }
 

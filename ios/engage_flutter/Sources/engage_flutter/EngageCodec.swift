@@ -51,7 +51,8 @@ func engageConfig(_ value: FlutterMap) throws -> EngageConfig {
     push: PushConfig(
       foregroundPresentation: foreground,
       notificationCategories: categories
-    )
+    ),
+    logLevel: EngageLogLevel(rawFlutter: value["logLevel"] as? String ?? "INFO")
   )
 }
 
@@ -89,6 +90,19 @@ private func notificationAction(_ value: Any) throws -> UNNotificationAction {
 private extension ForegroundPresentation {
   init(rawFlutter: String) {
     self = rawFlutter == "SILENT" ? .silent : .show
+  }
+}
+
+private extension EngageLogLevel {
+  init(rawFlutter: String) {
+    switch rawFlutter {
+    case "VERBOSE": self = .verbose
+    case "DEBUG": self = .debug
+    case "WARNING": self = .warning
+    case "ERROR": self = .error
+    case "NONE": self = .none
+    default: self = .info
+    }
   }
 }
 

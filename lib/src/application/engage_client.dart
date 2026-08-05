@@ -2,6 +2,7 @@ import 'dart:async';
 
 import '../domain/editors.dart';
 import '../domain/engage_platform.dart';
+import '../domain/engage_logging.dart';
 import '../domain/models.dart';
 
 typedef ActionHandler = FutureOr<ActionResult> Function(EngageAction action);
@@ -19,11 +20,13 @@ final class EngageClient {
       privacy = PrivacyApi._(platform),
       push = PushApi._(platform),
       messageCenter = MessageCenterApi._(platform) {
+    EngageLog.debug('Client', 'initializing');
     actions = ActionsApi._(platform);
     inApp = InAppApi._(platform);
     preferenceCenter = PreferenceCenterApi._(platform);
     platform.setNativeMethodHandler(_handleNativeMethod);
     _events = platform.events.listen(_handleEvent);
+    EngageLog.info('Client', 'initialized and subscribed to native events');
   }
 
   final EngagePlatform platform;
@@ -42,25 +45,41 @@ final class EngageClient {
   late final StreamSubscription<Map<String, Object?>> _events;
 
   Future<void> start(EngageConfig config) async {
+    EngageLog.configure(config.logLevel);
+    EngageLog.info(
+      'Client',
+      'start requested endpointHost=${Uri.tryParse(config.endpoint)?.host ?? 'invalid'}',
+    );
     _validateConfig(config);
     await platform.invoke('start', _encodeConfig(config));
     lifecycle.set(EngageLifecycle.started);
+    EngageLog.info('Client', 'started');
   }
 
   Future<void> dispose() async {
+    EngageLog.info('Client', 'disposing');
     platform.setNativeMethodHandler(null);
     await _events.cancel();
+    EngageLog.info('Client', 'disposed');
   }
 
   Future<Object?> _handleNativeMethod(String method, Object? arguments) async {
     final payload = _map(arguments);
+    EngageLog.debug(
+      'Client',
+      'native method handling method=$method argumentKeys=${payload.keys.toList()..sort()}',
+    );
     switch (method) {
       case 'actions.execute':
-        return actions._execute(payload);
+        final result = await actions._execute(payload);
+        EngageLog.info('Client', 'native action handled result=$result');
+        return result;
       case 'inApp.overlays.decide':
-        return enumWire(
+        final decision = enumWire(
           inApp.overlays._decide(_inAppContent(_map(payload['candidate']))),
         );
+        EngageLog.info('Client', 'overlay decision handled decision=$decision');
+        return decision;
       default:
         throw UnsupportedError('Unknown Engage native method: $method');
     }
@@ -69,17 +88,37 @@ final class EngageClient {
   void _handleEvent(Map<String, Object?> envelope) {
     final key = envelope['key'] as String?;
     final value = envelope['value'];
+    EngageLog.verbose(
+      'Client',
+      'native event dispatch key=$key scope=${envelope['scope']} valueType=${value?.runtimeType ?? 'null'}',
+    );
     switch (key) {
       case 'installation.id':
         installation.id.set(value as String?);
+        EngageLog.info(
+          'Client',
+          'installation id updated installationId=${value ?? 'none'}',
+        );
       case 'sdkFeatures.enabled':
         sdkFeatures.enabled.set(
           _list(value).map((item) => _sdkFeature(item as String)).toSet(),
         );
+        EngageLog.info(
+          'Client',
+          'enabled features updated count=${sdkFeatures.enabled.value.length}',
+        );
       case 'privacy.state':
         privacy.state.set(_privacyState(value as String));
+        EngageLog.info(
+          'Client',
+          'privacy state updated state=${privacy.state.value.name}',
+        );
       case 'push.status':
         push.status.set(_pushStatus(_map(value)));
+        EngageLog.info(
+          'Client',
+          'push status updated permission=${push.status.value.permission.name} subscription=${push.status.value.subscription.name} tokenRegistered=${push.status.value.tokenRegistered}',
+        );
       case 'push.events':
         push._addEvent(_pushEvent(_map(value)));
       case 'preferenceCenter.center':
@@ -88,6 +127,10 @@ final class EngageClient {
         inApp._updatePlacement(envelope['scope'] as String? ?? '', value);
       case 'messageCenter.unreadCount':
         messageCenter.inbox.unreadCount.set((value as num).toInt());
+        EngageLog.info(
+          'Client',
+          'message center unread updated count=${messageCenter.inbox.unreadCount.value}',
+        );
       case 'messageCenter.pager':
         messageCenter.inbox._updatePager(
           envelope['scope'] as String? ?? '',
@@ -112,7 +155,10 @@ final class InstallationApi {
     final editor = AttributeEditor();
     edit(editor);
     if (!editor.isEmpty) {
+      EngageLog.info('Installation', 'attribute edit submitted');
       await _platform.invoke('installation.editAttributes', editor.toJson());
+    } else {
+      EngageLog.verbose('Installation', 'attribute edit ignored reason=empty');
     }
   }
 
@@ -122,6 +168,10 @@ final class InstallationApi {
     final editor = InstallationSubscriptionEditor();
     edit(editor);
     if (!editor.isEmpty) {
+      EngageLog.info(
+        'Installation',
+        'subscription edit submitted count=${editor.toJson().length}',
+      );
       await _platform.invoke('installation.editSubscriptions', {
         'changes': editor.toJson(),
       });
@@ -140,6 +190,7 @@ final class ProfileApi {
     final editor = AttributeEditor();
     edit(editor);
     if (!editor.isEmpty) {
+      EngageLog.info('Profile', 'attribute edit submitted');
       await _platform.invoke('profile.editAttributes', editor.toJson());
     }
   }
@@ -148,6 +199,7 @@ final class ProfileApi {
     final editor = TagEditor();
     edit(editor);
     if (!editor.isEmpty) {
+      EngageLog.info('Profile', 'tag edit submitted');
       await _platform.invoke('profile.editTags', editor.toJson());
     }
   }
@@ -158,6 +210,10 @@ final class ProfileApi {
     final editor = ProfileSubscriptionEditor();
     edit(editor);
     if (!editor.isEmpty) {
+      EngageLog.info(
+        'Profile',
+        'subscription edit submitted count=${editor.toJson().length}',
+      );
       await _platform.invoke('profile.editSubscriptions', {
         'changes': editor.toJson(),
       });
@@ -177,11 +233,13 @@ final class EventsApi {
     validateEventName(name);
     final editor = EventEditor();
     edit?.call(editor);
+    EngageLog.info('Events', 'track requested name=$name');
     await _platform.invoke('events.track', {'name': name, ...editor.toJson()});
   }
 
   Future<void> trackScreen(String screenKey) async {
     validateProductKey(screenKey, label: 'screen key');
+    EngageLog.info('Events', 'screen requested key=$screenKey');
     await _platform.invoke('events.trackScreen', {'screenKey': screenKey});
   }
 
@@ -196,9 +254,16 @@ final class ActionRegistration {
   bool _cancelled = false;
 
   Future<void> cancel() async {
-    if (_cancelled) return;
+    if (_cancelled) {
+      EngageLog.verbose(
+        'Actions',
+        'cancellation ignored reason=already_cancelled',
+      );
+      return;
+    }
     _cancelled = true;
     await _cancel();
+    EngageLog.info('Actions', 'registration cancelled');
   }
 }
 
@@ -211,11 +276,13 @@ final class ActionsApi {
   ActionRegistration register(String name, ActionHandler handler) {
     validateProductKey(name, label: 'action key');
     _handlers[name] = handler;
+    EngageLog.info('Actions', 'registration requested name=$name');
     unawaited(_platform.invoke('actions.register', {'name': name}));
     return ActionRegistration._(() async {
       if (identical(_handlers[name], handler)) {
         _handlers.remove(name);
         await _platform.invoke('actions.unregister', {'name': name});
+        EngageLog.info('Actions', 'unregistered name=$name');
       }
     });
   }
@@ -223,14 +290,26 @@ final class ActionsApi {
   Future<String> _execute(JsonMap payload) async {
     final name = payload['name']! as String;
     final handler = _handlers[name];
-    if (handler == null) return enumWire(ActionResult.rejected);
+    if (handler == null) {
+      EngageLog.warning(
+        'Actions',
+        'execution rejected name=$name reason=no_handler',
+      );
+      return enumWire(ActionResult.rejected);
+    }
+    EngageLog.info(
+      'Actions',
+      'executing name=$name argumentKeys=${_map(payload['arguments']).keys.toList()..sort()}',
+    );
     final result = await handler(
       EngageAction(
         name: name,
         arguments: ActionArguments(_map(payload['arguments'])),
       ),
     );
-    return enumWire(result);
+    final wireResult = enumWire(result);
+    EngageLog.info('Actions', 'executed name=$name result=$wireResult');
+    return wireResult;
   }
 }
 
@@ -243,6 +322,10 @@ final class SdkFeaturesApi {
   Future<void> edit(void Function(SdkFeatureEditor editor) edit) async {
     final editor = SdkFeatureEditor(enabled.value);
     edit(editor);
+    EngageLog.info(
+      'Features',
+      'edit submitted enabled=${editor.build().map((value) => value.name).toList()..sort()}',
+    );
     await _platform.invoke('sdkFeatures.edit', {
       'enabled': editor.build().map(enumWire).toList(growable: false),
     });
@@ -311,6 +394,10 @@ final class PreferenceCenterApi {
     if (key != null) validateProductKey(key, label: 'preference center key');
     final scope = key ?? '';
     return _centers.putIfAbsent(scope, () {
+      EngageLog.info(
+        'Preferences',
+        'center subscribed key=${key ?? 'default'}',
+      );
       final state = EngageState<PreferenceCenterSnapshot?>(null);
       unawaited(_platform.invoke('preferenceCenter.observe', {'key': key}));
       return state;
@@ -319,12 +406,17 @@ final class PreferenceCenterApi {
 
   Future<void> display([String? key]) {
     if (key != null) validateProductKey(key, label: 'preference center key');
+    EngageLog.info('Preferences', 'display requested key=${key ?? 'default'}');
     return _platform.invoke('preferenceCenter.display', {'key': key});
   }
 
   void _update(String? scope, Object? value) {
     final state = _centers[scope ?? ''];
     state?.set(value == null ? null : _preferenceCenter(_map(value)));
+    EngageLog.debug(
+      'Preferences',
+      'center updated key=${scope?.isEmpty ?? true ? 'default' : scope} available=${value != null}',
+    );
   }
 }
 
@@ -334,9 +426,20 @@ final class PrivacyApi {
   final EngagePlatform _platform;
   final EngageState<PrivacyState> state = EngageState(PrivacyState.optedIn);
 
-  Future<void> optIn() => _platform.invoke('privacy.optIn');
-  Future<void> optOut() => _platform.invoke('privacy.optOut');
-  Future<void> optOutAndWipe() => _platform.invoke('privacy.optOutAndWipe');
+  Future<void> optIn() {
+    EngageLog.info('Privacy', 'opt-in requested');
+    return _platform.invoke('privacy.optIn');
+  }
+
+  Future<void> optOut() {
+    EngageLog.warning('Privacy', 'opt-out requested');
+    return _platform.invoke('privacy.optOut');
+  }
+
+  Future<void> optOutAndWipe() {
+    EngageLog.warning('Privacy', 'opt-out-and-wipe requested');
+    return _platform.invoke('privacy.optOutAndWipe');
+  }
 }
 
 final class PushApi {
@@ -355,9 +458,20 @@ final class PushApi {
   );
 
   Stream<PushEvent> get events => _events.stream;
-  Future<void> optIn() => _platform.invoke('push.optIn');
-  Future<void> optOut() => _platform.invoke('push.optOut');
-  void _addEvent(PushEvent event) => _events.add(event);
+  Future<void> optIn() {
+    EngageLog.info('Push', 'opt-in requested');
+    return _platform.invoke('push.optIn');
+  }
+
+  Future<void> optOut() {
+    EngageLog.info('Push', 'opt-out requested');
+    return _platform.invoke('push.optOut');
+  }
+
+  void _addEvent(PushEvent event) {
+    EngageLog.info('Push', 'event received type=${event.runtimeType}');
+    _events.add(event);
+  }
 }
 
 final class InAppOverlaysApi {
@@ -366,11 +480,24 @@ final class InAppOverlaysApi {
   final EngagePlatform _platform;
   InAppOverlayDisplayDelegate? displayDelegate;
 
-  Future<void> pause() => _platform.invoke('inApp.overlays.pause');
-  Future<void> resume() => _platform.invoke('inApp.overlays.resume');
+  Future<void> pause() {
+    EngageLog.info('InApp', 'overlays pause requested');
+    return _platform.invoke('inApp.overlays.pause');
+  }
 
-  DisplayDecision _decide(InAppContent candidate) =>
-      displayDelegate?.call(candidate) ?? DisplayDecision.allow;
+  Future<void> resume() {
+    EngageLog.info('InApp', 'overlays resume requested');
+    return _platform.invoke('inApp.overlays.resume');
+  }
+
+  DisplayDecision _decide(InAppContent candidate) {
+    final decision = displayDelegate?.call(candidate) ?? DisplayDecision.allow;
+    EngageLog.info(
+      'InApp',
+      'overlay decision messageId=${candidate.messageId} decision=${decision.name}',
+    );
+    return decision;
+  }
 }
 
 final class InAppApi {
@@ -383,6 +510,7 @@ final class InAppApi {
   EngageState<InAppContent?> placement(String key) {
     validateProductKey(key, label: 'placement key');
     return _placements.putIfAbsent(key, () {
+      EngageLog.info('InApp', 'placement subscribed key=$key');
       final state = EngageState<InAppContent?>(null);
       unawaited(_platform.invoke('inApp.observePlacement', {'key': key}));
       return state;
@@ -391,6 +519,10 @@ final class InAppApi {
 
   void _updatePlacement(String key, Object? value) {
     _placements[key]?.set(value == null ? null : _inAppContent(_map(value)));
+    EngageLog.info(
+      'InApp',
+      'placement updated key=$key messageId=${value == null ? 'none' : _map(value)['messageId']}',
+    );
   }
 }
 
@@ -426,15 +558,27 @@ final class _InboxPager implements InboxPager {
   Future<void> loadNextPage() => _invoke('messageCenter.pager.loadNextPage');
   @override
   Future<void> close() async {
-    if (_closed) return;
+    if (_closed) {
+      EngageLog.verbose(
+        'MessageCenter.Pager',
+        'close ignored id=$id reason=already_closed',
+      );
+      return;
+    }
+    EngageLog.info('MessageCenter.Pager', 'closing id=$id');
     _closed = true;
     _onClose(id);
     await _created;
     await _platform.invoke('messageCenter.pager.close', {'pagerId': id});
+    EngageLog.info('MessageCenter.Pager', 'closed id=$id');
   }
 
   Future<void> _invoke(String method) async {
     if (_closed) throw StateError('InboxPager is closed');
+    EngageLog.info(
+      'MessageCenter.Pager',
+      'command requested id=$id method=$method',
+    );
     await _created;
     if (_closed) throw StateError('InboxPager is closed');
     await _platform.invoke(method, {'pagerId': id});
@@ -458,6 +602,7 @@ final class InboxApi {
       );
     }
     final id = 'flutter-${++_nextPagerId}';
+    EngageLog.info('MessageCenter', 'pager creating id=$id pageSize=$pageSize');
     final created = _platform
         .invoke('messageCenter.pager.create', {
           'pagerId': id,
@@ -478,15 +623,29 @@ final class InboxApi {
       _mutate('messageCenter.markRead', entryId);
   Future<void> markUnread(InboxEntryId entryId) =>
       _mutate('messageCenter.markUnread', entryId);
-  Future<void> markAllRead() => _platform.invoke('messageCenter.markAllRead');
+  Future<void> markAllRead() {
+    EngageLog.info('MessageCenter', 'mark all read requested');
+    return _platform.invoke('messageCenter.markAllRead');
+  }
+
   Future<void> delete(InboxEntryId entryId) =>
       _mutate('messageCenter.delete', entryId);
 
-  Future<void> _mutate(String method, InboxEntryId id) =>
-      _platform.invoke(method, {'entryId': id.value});
+  Future<void> _mutate(String method, InboxEntryId id) {
+    EngageLog.info(
+      'MessageCenter',
+      'mutation requested method=$method entryId=$id',
+    );
+    return _platform.invoke(method, {'entryId': id.value});
+  }
 
-  void _updatePager(String id, InboxPagerState value) =>
-      _pagers[id]?.state.set(value);
+  void _updatePager(String id, InboxPagerState value) {
+    _pagers[id]?.state.set(value);
+    EngageLog.verbose(
+      'MessageCenter.Pager',
+      'state updated id=$id entries=${value.entries.length} refreshing=${value.isRefreshing} loadingMore=${value.isLoadingMore} hasMore=${value.hasMore} error=${value.error?.code.name}',
+    );
+  }
 }
 
 final class MessageCenterApi {
@@ -497,7 +656,10 @@ final class MessageCenterApi {
   final EngagePlatform _platform;
   final InboxApi inbox;
 
-  Future<void> display() => _platform.invoke('messageCenter.display');
+  Future<void> display() {
+    EngageLog.info('MessageCenter', 'display requested');
+    return _platform.invoke('messageCenter.display');
+  }
 }
 
 void _validateConfig(EngageConfig config) {
@@ -532,6 +694,7 @@ void _validateConfig(EngageConfig config) {
 JsonMap _encodeConfig(EngageConfig config) => {
   'appKey': config.appKey,
   'endpoint': config.endpoint,
+  'logLevel': enumWire(config.logLevel),
   'push': {
     'foregroundPresentation': enumWire(config.push.foregroundPresentation),
     if (config.push.android case final android?)

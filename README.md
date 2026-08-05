@@ -54,9 +54,16 @@ dependencies {
 await Engage.start(
   config: const EngageConfig(
     appKey: String.fromEnvironment('ENGAGE_APP_KEY'),
+    logLevel: EngageLogLevel.verbose,
   ),
 );
 ```
+
+`EngageLogLevel.info` is the default. Use `verbose` locally to trace Dart API calls, native bridge
+traffic, module lifecycle, persistence, network requests and state transitions. Dart records use
+the `Engage` logger name; Android records use Logcat tag `Engage`; iOS records use subsystem
+`io.engage.sdk` and category `Engage`. Technical IDs remain visible, while App keys, tokens,
+binding codes, attribute values and payload values are never logged.
 
 `Engage.start` creates the installation and activates the native modules. A
 second call with the same configuration is safe; the native SDK rejects a
@@ -88,6 +95,10 @@ final subscription = Engage.installation.id.listen((installationId) {
   diagnostics.recordInstallation(installationId);
 });
 ```
+
+Engage calls this value `installationId`; it does not expose a separate Airship-style `channelId`.
+For push readiness, also inspect `Engage.push.status.value`: `tokenRegistered` must become `true`
+in addition to the installation being present.
 
 Attributes, tags and subscriptions use typed editors:
 
@@ -144,6 +155,11 @@ Engage.push.events.listen((event) {
   }
 });
 ```
+
+`DEEPLINK` destinations are exposed through `PushOpened.deepLink` for the
+Flutter router. `WEB_URL` destinations are opened automatically in the system
+browser by the native Engage SDK; the open event is still emitted with a null
+`deepLink`, preventing duplicate navigation in Dart.
 
 Android resources are declared by name because Dart cannot reference a host
 App's generated `R` class. Every name is resolved and validated by the Android
