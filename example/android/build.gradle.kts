@@ -1,10 +1,9 @@
 allprojects {
     repositories {
-        mavenLocal()
         google()
         mavenCentral()
         maven("https://jitpack.io") {
-            content { includeGroup("com.github.mathias8dev") }
+            content { includeGroup("com.github.mathias8dev.engage-android") }
         }
     }
 }
