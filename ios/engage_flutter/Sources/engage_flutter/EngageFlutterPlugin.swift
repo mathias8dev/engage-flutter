@@ -486,7 +486,7 @@ public final class EngageFlutterPlugin: NSObject, FlutterPlugin, FlutterStreamHa
 
   private func invokeDart(method: String, arguments: Any?) async -> Any? {
     EngageLogger.verbose("Flutter", "Dart callback invoked method=\(method)")
-    await withCheckedContinuation { continuation in
+    return await withCheckedContinuation { continuation in
       DispatchQueue.main.async { [methods] in
         methods.invokeMethod(method, arguments: arguments) { value in
           EngageLogger.verbose(
