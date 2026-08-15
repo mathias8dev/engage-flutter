@@ -10,9 +10,8 @@ Install the published package from pub.dev:
 flutter pub add engage_flutter
 ```
 
-The plugin pins its Android JitPack modules and its iOS Swift package to the
-same native SDK version. Applications do not need to copy native SDK source
-code into their project.
+The plugin pins the modules from the Android monorepo and the iOS Swift package to the same native
+SDK version. Applications do not need to copy native SDK source code into their project.
 
 ## Requirements
 
@@ -21,10 +20,10 @@ code into their project.
 - iOS 15 or newer
 - Flutter Swift Package Manager support enabled for iOS
 
-For local Android bridge development, publish the five native SDK modules with
-the same version to Maven Local first. Maven Local uses the same coordinates
-as JitPack, so no dependency declaration changes are required. The example App
-already contains the repository and desugaring setup.
+For local Android bridge development, the example substitutes all five native dependencies with
+projects from the sibling `android/engage_android` repository. Set `ENGAGE_ANDROID_SDK_DIR` when
+using another checkout location. The example App already contains the repository and desugaring
+setup.
 
 ```kotlin
 // android/build.gradle.kts
@@ -33,7 +32,9 @@ allprojects {
         mavenLocal()
         google()
         mavenCentral()
-        maven("https://jitpack.io")
+        maven("https://jitpack.io") {
+            content { includeGroup("com.github.mathias8dev.engage-android") }
+        }
     }
 }
 

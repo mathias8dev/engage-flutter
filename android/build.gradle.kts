@@ -29,7 +29,7 @@ allprojects {
         google()
         mavenCentral()
         maven("https://jitpack.io") {
-            content { includeGroup("com.github.mathias8dev") }
+            content { includeGroup("com.github.mathias8dev.engage-android") }
         }
     }
 }
@@ -73,11 +73,12 @@ kotlin {
 
 dependencies {
     val engageSdkVersion = findProperty("engageSdkVersion")?.toString() ?: engageReleaseVersion
-    implementation("com.github.mathias8dev:engage-android-core:$engageSdkVersion")
-    implementation("com.github.mathias8dev:engage-android-push-fcm:$engageSdkVersion")
-    implementation("com.github.mathias8dev:engage-android-in-app:$engageSdkVersion")
-    implementation("com.github.mathias8dev:engage-android-message-center:$engageSdkVersion")
-    implementation("com.github.mathias8dev:engage-android-message-center-divkit:$engageSdkVersion")
+    val engageGroup = "com.github.mathias8dev.engage-android"
+    implementation("$engageGroup:engage-android-core:$engageSdkVersion")
+    implementation("$engageGroup:engage-android-push-fcm:$engageSdkVersion")
+    implementation("$engageGroup:engage-android-in-app:$engageSdkVersion")
+    implementation("$engageGroup:engage-android-message-center:$engageSdkVersion")
+    implementation("$engageGroup:engage-android-message-center-divkit:$engageSdkVersion")
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("androidx.test:core:1.7.0")

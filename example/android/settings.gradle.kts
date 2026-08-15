@@ -23,7 +23,7 @@ dependencyResolutionManagement {
         google()
         mavenCentral()
         maven("https://jitpack.io") {
-            content { includeGroup("com.github.mathias8dev") }
+            content { includeGroup("com.github.mathias8dev.engage-android") }
         }
     }
 }
@@ -37,23 +37,23 @@ plugins {
 include(":app")
 
 if (providers.gradleProperty("engageUseLocalAndroidSdk").orNull == "true") {
-    val localAndroidSdkDirectory = file("../../../../android").canonicalFile
-    val localModules = mapOf(
-        "engage_core" to "com.github.mathias8dev:engage-android-core",
-        "engage_push_fcm" to "com.github.mathias8dev:engage-android-push-fcm",
-        "engage_in_app" to "com.github.mathias8dev:engage-android-in-app",
-        "engage_message_center" to "com.github.mathias8dev:engage-android-message-center",
-        "engage_message_center_divkit" to "com.github.mathias8dev:engage-android-message-center-divkit",
-    )
-    localModules.forEach { (directory, coordinate) ->
-        val moduleDirectory = localAndroidSdkDirectory.resolve(directory)
-        require(moduleDirectory.resolve("settings.gradle.kts").isFile) {
-            "Local Engage Android module not found: $moduleDirectory"
-        }
-        includeBuild(moduleDirectory) {
-            dependencySubstitution {
-                substitute(module(coordinate)).using(project(":"))
-            }
+    val configuredDirectory = providers.environmentVariable("ENGAGE_ANDROID_SDK_DIR").orNull
+    val localAndroidSdkDirectory = configuredDirectory
+        ?.let(::file)
+        ?.canonicalFile
+        ?: file("../../../../android/engage_android").canonicalFile
+    require(localAndroidSdkDirectory.resolve("settings.gradle.kts").isFile) {
+        "Local Engage Android repository not found: $localAndroidSdkDirectory"
+    }
+    includeBuild(localAndroidSdkDirectory) {
+        dependencySubstitution {
+            val group = "com.github.mathias8dev.engage-android"
+            substitute(module("$group:engage-android-core")).using(project(":engage_core"))
+            substitute(module("$group:engage-android-push-fcm")).using(project(":engage_push_fcm"))
+            substitute(module("$group:engage-android-in-app")).using(project(":engage_in_app"))
+            substitute(module("$group:engage-android-message-center")).using(project(":engage_message_center"))
+            substitute(module("$group:engage-android-message-center-divkit"))
+                .using(project(":engage_message_center_divkit"))
         }
     }
 }

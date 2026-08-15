@@ -1,12 +1,11 @@
 # Releasing
 
-All native and Flutter repositories use the same full semantic version without a `v` prefix.
-Release the native repositories first in this order:
+The Android monorepo, iOS repository, and Flutter package use the same full semantic version
+without a `v` prefix. Release them in this order:
 
-1. `engage-android-core` and `engage-ios`;
-2. `engage-android-push-fcm`, `engage-android-in-app`, and `engage-android-message-center`;
-3. `engage-android-message-center-divkit`;
-4. `engage-flutter`.
+1. `engage-android` and `engage-ios`;
+2. verify every Android module on JitPack;
+3. `engage-flutter`.
 
 Before the first pub.dev release, create the package interactively with
 `mise run publish:first`. The task reads the version from `pubspec.yaml`. Then configure pub.dev trusted publishing for
