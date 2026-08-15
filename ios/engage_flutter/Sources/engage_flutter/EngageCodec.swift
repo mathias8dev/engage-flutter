@@ -60,12 +60,21 @@ private func notificationCategory(_ value: Any) throws -> UNNotificationCategory
   guard let category = value as? FlutterMap else {
     throw EngageFlutterCodecError.invalidArgument("Invalid iOS notification category")
   }
+  let identifier = try category.string("key")
   let actions = try category.list("actions").map(notificationAction)
+  guard let hiddenPreviewsBodyPlaceholder = category["hiddenPreviewsBodyPlaceholder"] as? String else {
+    return UNNotificationCategory(
+      identifier: identifier,
+      actions: actions,
+      intentIdentifiers: [],
+      options: []
+    )
+  }
   return UNNotificationCategory(
-    identifier: try category.string("key"),
+    identifier: identifier,
     actions: actions,
     intentIdentifiers: [],
-    hiddenPreviewsBodyPlaceholder: category["hiddenPreviewsBodyPlaceholder"] as? String,
+    hiddenPreviewsBodyPlaceholder: hiddenPreviewsBodyPlaceholder,
     options: []
   )
 }
