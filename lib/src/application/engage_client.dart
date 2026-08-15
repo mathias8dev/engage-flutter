@@ -277,7 +277,7 @@ final class ActionsApi {
     validateProductKey(name, label: 'action key');
     _handlers[name] = handler;
     EngageLog.info('Actions', 'registration requested name=$name');
-    unawaited(_platform.invoke('actions.register', {'name': name}));
+    _invokeInBackground(_platform, 'actions.register', {'name': name});
     return ActionRegistration._(() async {
       if (identical(_handlers[name], handler)) {
         _handlers.remove(name);
@@ -399,7 +399,7 @@ final class PreferenceCenterApi {
         'center subscribed key=${key ?? 'default'}',
       );
       final state = EngageState<PreferenceCenterSnapshot?>(null);
-      unawaited(_platform.invoke('preferenceCenter.observe', {'key': key}));
+      _invokeInBackground(_platform, 'preferenceCenter.observe', {'key': key});
       return state;
     });
   }
@@ -512,7 +512,7 @@ final class InAppApi {
     return _placements.putIfAbsent(key, () {
       EngageLog.info('InApp', 'placement subscribed key=$key');
       final state = EngageState<InAppContent?>(null);
-      unawaited(_platform.invoke('inApp.observePlacement', {'key': key}));
+      _invokeInBackground(_platform, 'inApp.observePlacement', {'key': key});
       return state;
     });
   }
@@ -524,6 +524,25 @@ final class InAppApi {
       'placement updated key=$key messageId=${value == null ? 'none' : _map(value)['messageId']}',
     );
   }
+}
+
+void _invokeInBackground(
+  EngagePlatform platform,
+  String method, [
+  Object? arguments,
+]) {
+  unawaited(() async {
+    try {
+      await platform.invoke(method, arguments);
+    } on Object catch (error, stackTrace) {
+      EngageLog.error(
+        'Client',
+        'background native call failed method=$method',
+        error: error,
+        stackTrace: stackTrace,
+      );
+    }
+  }());
 }
 
 abstract interface class InboxPager {

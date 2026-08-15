@@ -5,6 +5,7 @@ import EngageSDK
 public final class EngageFlutterPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
   private let methods: FlutterMethodChannel
   private var eventSink: FlutterEventSink?
+  private var pendingEvents: [FlutterMap] = []
   private var started = false
   private var observationTasks: [Task<Void, Never>] = []
   private var placementTasks: [String: Task<Void, Never>] = [:]
@@ -31,6 +32,7 @@ public final class EngageFlutterPlugin: NSObject, FlutterPlugin, FlutterStreamHa
 
   public static func register(with registrar: FlutterPluginRegistrar) {
     EngageLogger.info("Flutter", "iOS plugin registering")
+    PushModule.prepareForLaunch()
     let methods = FlutterMethodChannel(
       name: "io.engage.flutter/methods",
       binaryMessenger: registrar.messenger()
@@ -249,14 +251,21 @@ public final class EngageFlutterPlugin: NSObject, FlutterPlugin, FlutterStreamHa
     eventSink events: @escaping FlutterEventSink
   ) -> FlutterError? {
     EngageLogger.debug("Flutter", "event listener attached observersStarted=\(started)")
+    lock.lock()
     eventSink = events
+    let pending = pendingEvents
+    pendingEvents.removeAll()
+    pending.forEach { envelope in DispatchQueue.main.async { events(envelope) } }
+    lock.unlock()
     if started { emitCurrentState() }
     return nil
   }
 
   public func onCancel(withArguments arguments: Any?) -> FlutterError? {
     EngageLogger.debug("Flutter", "event listener detached")
+    lock.lock()
     eventSink = nil
+    lock.unlock()
     return nil
   }
 
@@ -491,17 +500,22 @@ public final class EngageFlutterPlugin: NSObject, FlutterPlugin, FlutterStreamHa
   }
 
   private func emit(key: String, value: Any?, scope: String? = nil) {
-    let sink = eventSink
-    guard let sink else {
-      EngageLogger.verbose("Flutter", "event not emitted key=\(key) reason=no_listener")
+    var envelope: FlutterMap = ["key": key, "value": value ?? NSNull()]
+    if let scope { envelope["scope"] = scope }
+    lock.lock()
+    guard let sink = eventSink else {
+      pendingEvents.append(envelope)
+      if pendingEvents.count > 64 { pendingEvents.removeFirst(pendingEvents.count - 64) }
+      let count = pendingEvents.count
+      lock.unlock()
+      EngageLogger.verbose("Flutter", "event buffered key=\(key) pending=\(count)")
       return
     }
+    lock.unlock()
     EngageLogger.verbose(
       "Flutter",
       "event emitted key=\(key) scope=\(scope ?? "") valueType=\(String(describing: type(of: value)))"
     )
-    var envelope: FlutterMap = ["key": key, "value": value ?? NSNull()]
-    if let scope { envelope["scope"] = scope }
     DispatchQueue.main.async { sink(envelope) }
   }
 

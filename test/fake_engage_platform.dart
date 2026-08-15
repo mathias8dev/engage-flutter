@@ -52,3 +52,16 @@ final class DeferredPagerPlatform extends FakeEngagePlatform {
 
   void completeCreation() => _creation.complete();
 }
+
+final class FailingBackgroundPlatform extends FakeEngagePlatform {
+  @override
+  Future<Object?> invoke(String method, [Object? arguments]) async {
+    await super.invoke(method, arguments);
+    if (method == 'actions.register' ||
+        method == 'preferenceCenter.observe' ||
+        method == 'inApp.observePlacement') {
+      throw StateError('bridge unavailable: $method');
+    }
+    return null;
+  }
+}

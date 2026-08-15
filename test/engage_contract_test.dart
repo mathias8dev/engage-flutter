@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:engage_flutter/engage_flutter.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -125,6 +127,22 @@ void main() {
     expect(response, 'COMPLETED');
     await registration.cancel();
     expect(platform.invocations.last.method, 'actions.unregister');
+  });
+
+  test('background bridge registration failures are contained', () async {
+    final failing = FailingBackgroundPlatform();
+    await Engage.usePlatformForTesting(failing);
+    final uncaught = <Object>[];
+
+    await runZonedGuarded(() async {
+      Engage.actions.register('open_order', (_) => ActionResult.completed);
+      Engage.preferenceCenter.center('account');
+      Engage.inApp.placement('home.hero');
+      await Future<void>.delayed(Duration.zero);
+    }, (error, _) => uncaught.add(error));
+
+    expect(uncaught, isEmpty);
+    expect(failing.invocations, hasLength(3));
   });
 
   test(
