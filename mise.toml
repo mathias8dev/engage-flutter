@@ -12,7 +12,10 @@ run = "./scripts/install-git-hooks.sh"
 
 [tasks.bootstrap]
 description = "Resolve Flutter dependencies"
-run = "flutter pub get"
+run = [
+    "flutter config --enable-swift-package-manager",
+    "flutter pub get",
+]
 
 [tasks.check]
 description = "Format-check, analyze, and test the Flutter and native Android bridges"
@@ -21,7 +24,7 @@ run = [
     "dart format --output=none --set-exit-if-changed lib test example/lib",
     "flutter analyze",
     "flutter test",
-    "cd example/android && ./gradlew :engage_flutter:testDebugUnitTest -PengageUseLocalAndroidSdk=true",
+    "cd example/android && ./gradlew :engage_flutter:testDebugUnitTest",
 ]
 
 [tasks."package:check"]
