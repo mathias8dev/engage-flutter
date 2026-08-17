@@ -12,8 +12,9 @@ Install the published package from pub.dev:
 flutter pub add engage_flutter
 ```
 
-The plugin pins the modules from the Android monorepo and the iOS Swift package to the same native
-SDK version. Applications do not need to copy native SDK source code into their project.
+The plugin pins independently compatible versions of the Android modules and the iOS Swift
+package. A Flutter package update does not implicitly request native artifacts with the same
+version number. Applications do not need to copy native SDK source code into their project.
 
 ### Android repository
 

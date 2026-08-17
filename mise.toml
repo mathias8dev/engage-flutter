@@ -21,6 +21,7 @@ run = [
 description = "Format-check, analyze, and test the Flutter and native Android bridges"
 depends = ["bootstrap"]
 run = [
+    "./scripts/validate-version.sh",
     "dart format --output=none --set-exit-if-changed lib test example/lib",
     "flutter analyze",
     "flutter test",

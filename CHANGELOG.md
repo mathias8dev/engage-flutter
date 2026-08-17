@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Decouple the Flutter package version from the independently pinned Engage Android and iOS SDK
+  versions.
+- Validate native compatibility pins without forcing cross-platform version equality.
+
 ## 2.1.0
 
 - Add the complete Engage Flutter facade for Android and iOS.
