@@ -4,6 +4,8 @@ The official Flutter bridge for the Engage Android and iOS SDKs. It delegates
 storage, synchronization, push, in-app evaluation and Inbox behavior to the
 native SDKs; Dart exposes one idiomatic API and multicast state streams.
 
+## Installation
+
 Install the published package from pub.dev:
 
 ```shell
@@ -13,23 +15,18 @@ flutter pub add engage_flutter
 The plugin pins the modules from the Android monorepo and the iOS Swift package to the same native
 SDK version. Applications do not need to copy native SDK source code into their project.
 
-## Requirements
+### Android repository
 
-- Flutter 3.41 or newer
-- Android API 24 or newer, Java 17 and core library desugaring
-- iOS 15 or newer
-- Flutter Swift Package Manager support enabled for iOS
+Downloading `engage_flutter` from pub.dev installs the Dart package and the Flutter bridge. The
+bridge still declares five native Android dependencies published by the `engage-android` monorepo
+on JitPack. Gradle repositories are controlled by the consuming application and are not inherited
+from a library, so every Android host must make JitPack available explicitly.
 
-For local Android bridge development, the example substitutes all five native dependencies with
-projects from the sibling `android/engage_android` repository. Set `ENGAGE_ANDROID_SDK_DIR` when
-using another checkout location. The example App already contains the repository and desugaring
-setup.
+For a standard Flutter Android project, add the repository to `android/build.gradle.kts`:
 
 ```kotlin
-// android/build.gradle.kts
 allprojects {
     repositories {
-        mavenLocal()
         google()
         mavenCentral()
         maven("https://jitpack.io") {
@@ -37,7 +34,22 @@ allprojects {
         }
     }
 }
+```
 
+If the application centralizes repositories with `RepositoriesMode.FAIL_ON_PROJECT_REPOS`, put the
+same JitPack declaration inside `dependencyResolutionManagement.repositories` in
+`android/settings.gradle.kts` instead. Without it, Gradle reports that the
+`com.github.mathias8dev.engage-android` modules cannot be found even though the Flutter package was
+downloaded successfully from pub.dev.
+
+## Requirements
+
+- Flutter 3.41 or newer
+- Android API 24 or newer, Java 17 and core library desugaring
+- iOS 15 or newer
+- Flutter Swift Package Manager support enabled for iOS
+
+```kotlin
 // android/app/build.gradle.kts
 android {
     defaultConfig { minSdk = 24 }
