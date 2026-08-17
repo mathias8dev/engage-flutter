@@ -41,6 +41,13 @@ Dart owns only Flutter-facing concerns:
 - routing native action callbacks to registered Dart handlers;
 - hosting embedded native renderers in Platform Views.
 
+## Version ownership
+
+The Flutter package and both native SDKs are versioned independently. `pubspec.yaml` identifies the
+Flutter release, while the Android Gradle bridge and iOS package manifest each pin an explicitly
+compatible native SDK version. A Dart-only or bridge-only release therefore does not require dummy
+Android or iOS releases, and adopting a new native SDK remains a deliberate, reviewable change.
+
 ## Channels
 
 Commands use `io.engage.flutter/methods`. Native state and push events share the

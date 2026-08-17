@@ -4,14 +4,44 @@ The official Flutter bridge for the Engage Android and iOS SDKs. It delegates
 storage, synchronization, push, in-app evaluation and Inbox behavior to the
 native SDKs; Dart exposes one idiomatic API and multicast state streams.
 
+## Installation
+
 Install the published package from pub.dev:
 
 ```shell
 flutter pub add engage_flutter
 ```
 
-The plugin pins the modules from the Android monorepo and the iOS Swift package to the same native
-SDK version. Applications do not need to copy native SDK source code into their project.
+The plugin pins independently compatible versions of the Android modules and the iOS Swift
+package. A Flutter package update does not implicitly request native artifacts with the same
+version number. Applications do not need to copy native SDK source code into their project.
+
+### Android repository
+
+Downloading `engage_flutter` from pub.dev installs the Dart package and the Flutter bridge. The
+bridge still declares five native Android dependencies published by the `engage-android` monorepo
+on JitPack. Gradle repositories are controlled by the consuming application and are not inherited
+from a library, so every Android host must make JitPack available explicitly.
+
+For a standard Flutter Android project, add the repository to `android/build.gradle.kts`:
+
+```kotlin
+allprojects {
+    repositories {
+        google()
+        mavenCentral()
+        maven("https://jitpack.io") {
+            content { includeGroup("com.github.mathias8dev.engage-android") }
+        }
+    }
+}
+```
+
+If the application centralizes repositories with `RepositoriesMode.FAIL_ON_PROJECT_REPOS`, put the
+same JitPack declaration inside `dependencyResolutionManagement.repositories` in
+`android/settings.gradle.kts` instead. Without it, Gradle reports that the
+`com.github.mathias8dev.engage-android` modules cannot be found even though the Flutter package was
+downloaded successfully from pub.dev.
 
 ## Requirements
 
@@ -20,24 +50,7 @@ SDK version. Applications do not need to copy native SDK source code into their 
 - iOS 15 or newer
 - Flutter Swift Package Manager support enabled for iOS
 
-For local Android bridge development, the example substitutes all five native dependencies with
-projects from the sibling `android/engage_android` repository. Set `ENGAGE_ANDROID_SDK_DIR` when
-using another checkout location. The example App already contains the repository and desugaring
-setup.
-
 ```kotlin
-// android/build.gradle.kts
-allprojects {
-    repositories {
-        mavenLocal()
-        google()
-        mavenCentral()
-        maven("https://jitpack.io") {
-            content { includeGroup("com.github.mathias8dev.engage-android") }
-        }
-    }
-}
-
 // android/app/build.gradle.kts
 android {
     defaultConfig { minSdk = 24 }

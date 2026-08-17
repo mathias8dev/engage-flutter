@@ -6,6 +6,7 @@ import PackageDescription
 
 let manifestDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
 let localEngageConfiguration = manifestDirectory.appendingPathComponent(".engage-local")
+let engageIosSdkVersion: Version = "2.1.0"
 let engageIosDependency: Package.Dependency
 
 if FileManager.default.fileExists(atPath: localEngageConfiguration.path) {
@@ -20,7 +21,7 @@ if FileManager.default.fileExists(atPath: localEngageConfiguration.path) {
 } else {
     engageIosDependency = .package(
         url: "https://github.com/mathias8dev/engage-ios.git",
-        exact: "2.1.0"
+        exact: engageIosSdkVersion
     )
 }
 

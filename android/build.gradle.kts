@@ -2,14 +2,15 @@ import java.io.File
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 group = "io.engage"
-val engageReleaseVersion = File(projectDir, "../pubspec.yaml")
+val engageFlutterVersion = File(projectDir, "../pubspec.yaml")
     .useLines { lines ->
         lines.first { it.startsWith("version:") }
             .substringAfter(':')
             .trim()
             .substringBefore(' ')
     }
-version = findProperty("engageFlutterVersion")?.toString() ?: engageReleaseVersion
+val engageAndroidSdkVersion = "2.1.0"
+version = findProperty("engageFlutterVersion")?.toString() ?: engageFlutterVersion
 
 buildscript {
     val kotlinVersion = "2.2.20"
@@ -72,13 +73,12 @@ kotlin {
 }
 
 dependencies {
-    val engageSdkVersion = findProperty("engageSdkVersion")?.toString() ?: engageReleaseVersion
     val engageGroup = "com.github.mathias8dev.engage-android"
-    implementation("$engageGroup:engage-android-core:$engageSdkVersion")
-    implementation("$engageGroup:engage-android-push-fcm:$engageSdkVersion")
-    implementation("$engageGroup:engage-android-in-app:$engageSdkVersion")
-    implementation("$engageGroup:engage-android-message-center:$engageSdkVersion")
-    implementation("$engageGroup:engage-android-message-center-divkit:$engageSdkVersion")
+    implementation("$engageGroup:engage-android-core:$engageAndroidSdkVersion")
+    implementation("$engageGroup:engage-android-push-fcm:$engageAndroidSdkVersion")
+    implementation("$engageGroup:engage-android-in-app:$engageAndroidSdkVersion")
+    implementation("$engageGroup:engage-android-message-center:$engageAndroidSdkVersion")
+    implementation("$engageGroup:engage-android-message-center-divkit:$engageAndroidSdkVersion")
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("androidx.test:core:1.7.0")
