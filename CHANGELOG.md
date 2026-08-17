@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 2.1.1
+
 - Decouple the Flutter package version from the independently pinned Engage Android and iOS SDK
   versions.
 - Validate native compatibility pins without forcing cross-platform version equality.
