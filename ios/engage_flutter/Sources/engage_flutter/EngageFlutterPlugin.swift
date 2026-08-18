@@ -183,6 +183,9 @@ public final class EngageFlutterPlugin: NSObject, FlutterPlugin, FlutterStreamHa
         case "preferenceCenter.observe":
           observePreferenceCenter(arguments["key"] as? String)
           result(nil)
+        case "preferenceCenter.refresh":
+          try await Engage.preferenceCenter.refresh()
+          result(nil)
         case "preferenceCenter.display":
           Engage.preferenceCenter.display(
             arguments["key"] as? String,

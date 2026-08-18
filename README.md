@@ -322,11 +322,30 @@ Navigator.of(context).push(
 Engage.preferenceCenter.center('mobile-notifications').listen((snapshot) {
   customPreferences.render(snapshot);
 });
+
+final resource = Engage.preferenceCenter.resource('mobile-notifications');
+resource.listen((state) {
+  switch (state.status) {
+    case PreferenceCenterResourceStatus.loading:
+      showLoading(state.data); // data may contain the last successful snapshot
+    case PreferenceCenterResourceStatus.success:
+      showPreferences(state.data);
+    case PreferenceCenterResourceStatus.error:
+      showRefreshError(state.error, staleData: state.data);
+  }
+});
+
+await Engage.preferenceCenter.refresh();
 ```
 
 `EngagePreferenceCenter` owns only the ready-made content. The host owns the
 route, app bar, scaffold, and safe areas, exactly as it does for the embedded
 Message Center. The widget inherits the current Material 3 theme and locale.
+It renders the resource state owned by `Engage.preferenceCenter`, supports
+pull-to-refresh, keeps stale content visible when a refresh fails, and shows a
+per-preference progress indicator while an edit is being accepted by the
+native SDK. Its built-in English and French copy can be replaced by registering
+a custom `LocalizationsDelegate<EngageLocalizations>` in the host application.
 Ready-made and custom UIs read the same native projection; updates still go
 through `Engage.profile.editSubscriptions` and
 `Engage.installation.editSubscriptions`.

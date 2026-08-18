@@ -347,6 +347,36 @@ final class PreferenceCenterSnapshot {
   final List<PreferenceSection> sections;
 }
 
+enum PreferenceCenterResourceStatus { loading, success, error }
+
+/// Current Preference Center data and the state of its native synchronization.
+final class PreferenceCenterResource {
+  const PreferenceCenterResource._({
+    required this.status,
+    this.data,
+    this.error,
+  });
+
+  const PreferenceCenterResource.loading([PreferenceCenterSnapshot? data])
+    : this._(status: PreferenceCenterResourceStatus.loading, data: data);
+
+  const PreferenceCenterResource.success(PreferenceCenterSnapshot? data)
+    : this._(status: PreferenceCenterResourceStatus.success, data: data);
+
+  const PreferenceCenterResource.error(
+    Object error, [
+    PreferenceCenterSnapshot? data,
+  ]) : this._(
+         status: PreferenceCenterResourceStatus.error,
+         data: data,
+         error: error,
+       );
+
+  final PreferenceCenterResourceStatus status;
+  final PreferenceCenterSnapshot? data;
+  final Object? error;
+}
+
 final class PreferenceSection {
   const PreferenceSection({
     required this.key,

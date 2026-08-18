@@ -142,6 +142,7 @@ public class EngageFlutterPlugin :
                     arguments["default"].toJsonElement(),
                 ).toFlutter()
                 "preferenceCenter.observe" -> observePreferenceCenter(arguments["key"] as String?)
+                "preferenceCenter.refresh" -> Engage.preferenceCenter.refresh()
                 "preferenceCenter.display" -> Engage.preferenceCenter.display(
                     applicationContext.preferenceCenterDisplayOptions(arguments),
                 )
