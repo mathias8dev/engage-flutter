@@ -5,6 +5,7 @@ import '../domain/engage_platform.dart';
 import '../domain/engage_logging.dart';
 import '../domain/models.dart';
 import '../infrastructure/message_center_codec.dart';
+import '../presentation/engage_material_theme.dart';
 
 typedef ActionHandler = FutureOr<ActionResult> Function(EngageAction action);
 typedef InAppOverlayDisplayDelegate =
@@ -405,10 +406,13 @@ final class PreferenceCenterApi {
     });
   }
 
-  Future<void> display([String? key]) {
+  Future<void> display({String? key, EngageMaterialTheme? theme}) {
     if (key != null) validateProductKey(key, label: 'preference center key');
     EngageLog.info('Preferences', 'display requested key=${key ?? 'default'}');
-    return _platform.invoke('preferenceCenter.display', {'key': key});
+    return _platform.invoke('preferenceCenter.display', {
+      'key': key,
+      ...?theme?.toPlatform(),
+    });
   }
 
   void _update(String? scope, Object? value) {

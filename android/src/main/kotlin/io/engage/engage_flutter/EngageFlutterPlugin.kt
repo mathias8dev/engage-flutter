@@ -142,9 +142,9 @@ public class EngageFlutterPlugin :
                     arguments["default"].toJsonElement(),
                 ).toFlutter()
                 "preferenceCenter.observe" -> observePreferenceCenter(arguments["key"] as String?)
-                "preferenceCenter.display" -> (arguments["key"] as String?)
-                    ?.let(Engage.preferenceCenter::display)
-                    ?: Engage.preferenceCenter.display()
+                "preferenceCenter.display" -> Engage.preferenceCenter.display(
+                    applicationContext.preferenceCenterDisplayOptions(arguments),
+                )
                 "privacy.optIn" -> Engage.privacy.optIn()
                 "privacy.optOut" -> Engage.privacy.optOut()
                 "privacy.optOutAndWipe" -> Engage.privacy.optOutAndWipe()
@@ -672,6 +672,35 @@ private fun Context.messageCenterMaterialTheme(arguments: FlutterMap): MessageCe
         outlineVariant = color("outlineVariant", defaults.outlineVariant),
         error = color("error", defaults.error),
         onError = color("onError", defaults.onError),
+    )
+}
+
+private fun Context.preferenceCenterDisplayOptions(arguments: FlutterMap): PreferenceCenterDisplayOptions {
+    val defaults = MessageCenterMaterialTheme.defaults(this)
+    val values = arguments["material3"]?.asMap().orEmpty()
+    fun color(key: String, fallback: Int): Int = (values[key] as? Number)?.toLong()?.toInt() ?: fallback
+    val appearance = when (arguments["appearance"] as? String) {
+        "DARK" -> PreferenceCenterAppearance.DARK
+        else -> PreferenceCenterAppearance.LIGHT
+    }
+    return PreferenceCenterDisplayOptions(
+        key = arguments["key"] as? String,
+        localeLanguageTag = arguments["locale"] as? String,
+        materialTheme = PreferenceCenterMaterialTheme(
+            appearance = appearance,
+            primary = color("primary", defaults.primary),
+            onPrimary = color("onPrimary", defaults.onPrimary),
+            primaryContainer = color("primaryContainer", defaults.primaryContainer),
+            onPrimaryContainer = color("onPrimaryContainer", defaults.primary),
+            surface = color("surface", defaults.surface),
+            surfaceContainerLow = color("surfaceContainerLow", defaults.surfaceContainerLow),
+            surfaceContainer = color("surfaceContainer", defaults.surfaceContainer),
+            onSurface = color("onSurface", defaults.onSurface),
+            onSurfaceVariant = color("onSurfaceVariant", defaults.onSurfaceVariant),
+            outlineVariant = color("outlineVariant", defaults.outlineVariant),
+            error = color("error", defaults.error),
+            onError = color("onError", defaults.onError),
+        ),
     )
 }
 

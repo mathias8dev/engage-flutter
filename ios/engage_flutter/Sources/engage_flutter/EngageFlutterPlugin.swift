@@ -184,7 +184,10 @@ public final class EngageFlutterPlugin: NSObject, FlutterPlugin, FlutterStreamHa
           observePreferenceCenter(arguments["key"] as? String)
           result(nil)
         case "preferenceCenter.display":
-          Engage.preferenceCenter.display(arguments["key"] as? String)
+          Engage.preferenceCenter.display(
+            arguments["key"] as? String,
+            materialTheme: preferenceCenterMaterialTheme(arguments)
+          )
           result(nil)
         case "privacy.optIn":
           try await Engage.privacy.optIn()
@@ -892,6 +895,33 @@ private func messageCenterEnvironment(_ args: Any?) -> MessageCenterEnvironment 
       itemSpacing: dimension("itemSpacing", fallback: defaultLayout.itemSpacing),
       itemCornerRadius: dimension("itemCornerRadius", fallback: defaultLayout.itemCornerRadius)
     )
+  )
+}
+
+@MainActor
+private func preferenceCenterMaterialTheme(_ arguments: FlutterMap) -> PreferenceCenterMaterialTheme {
+  let material = arguments["material3"] as? FlutterMap ?? [:]
+  let defaults = PreferenceCenterMaterialTheme.system
+  func color(_ key: String, fallback: UIColor) -> UIColor {
+    guard let number = material[key] as? NSNumber else { return fallback }
+    let argb = UInt32(truncating: number)
+    return UIColor(
+      red: CGFloat((argb >> 16) & 0xFF) / 255,
+      green: CGFloat((argb >> 8) & 0xFF) / 255,
+      blue: CGFloat(argb & 0xFF) / 255,
+      alpha: CGFloat((argb >> 24) & 0xFF) / 255
+    )
+  }
+  return PreferenceCenterMaterialTheme(
+    primary: color("primary", fallback: defaults.primary),
+    onPrimary: color("onPrimary", fallback: defaults.onPrimary),
+    primaryContainer: color("primaryContainer", fallback: defaults.primaryContainer),
+    onPrimaryContainer: color("onPrimaryContainer", fallback: defaults.onPrimaryContainer),
+    surface: color("surface", fallback: defaults.surface),
+    surfaceContainerLow: color("surfaceContainerLow", fallback: defaults.surfaceContainerLow),
+    onSurface: color("onSurface", fallback: defaults.onSurface),
+    onSurfaceVariant: color("onSurfaceVariant", fallback: defaults.onSurfaceVariant),
+    outlineVariant: color("outlineVariant", fallback: defaults.outlineVariant)
   )
 }
 

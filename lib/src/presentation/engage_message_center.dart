@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 
 import '../domain/models.dart';
 import '../infrastructure/message_center_codec.dart';
+import 'engage_material_theme.dart';
 
 enum MessageCenterViewErrorCode { inbox, rendering }
 
@@ -212,26 +213,8 @@ Map<String, Object?> _environmentParams(
   BuildContext context,
   EngageMessageCenterLayout layout,
 ) {
-  final theme = Theme.of(context);
-  final colors = theme.colorScheme;
-  return {
-    'appearance': theme.brightness.name.toUpperCase(),
-    'locale': Localizations.localeOf(context).toLanguageTag(),
-    'material3': {
-      'primary': colors.primary.toARGB32(),
-      'onPrimary': colors.onPrimary.toARGB32(),
-      'primaryContainer': colors.primaryContainer.toARGB32(),
-      'surface': colors.surface.toARGB32(),
-      'surfaceContainerLow': colors.surfaceContainerLow.toARGB32(),
-      'surfaceContainer': colors.surfaceContainer.toARGB32(),
-      'onSurface': colors.onSurface.toARGB32(),
-      'onSurfaceVariant': colors.onSurfaceVariant.toARGB32(),
-      'outlineVariant': colors.outlineVariant.toARGB32(),
-      'error': colors.error.toARGB32(),
-      'onError': colors.onError.toARGB32(),
-    },
-    'layout': layout._toPlatform(),
-  };
+  final theme = EngageMaterialTheme.of(context);
+  return {...theme.toPlatform(), 'layout': layout._toPlatform()};
 }
 
 MessageCenterViewException _decodeError(Object? value) {

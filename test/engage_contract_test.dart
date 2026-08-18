@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:engage_flutter/engage_flutter.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'fake_engage_platform.dart';
@@ -165,6 +166,116 @@ void main() {
     expect(uncaught, isEmpty);
     expect(failing.invocations, hasLength(3));
   });
+
+  test(
+    'preference center forwards the captured Material 3 environment',
+    () async {
+      await Engage.preferenceCenter.display(
+        key: 'account',
+        theme: const EngageMaterialTheme(
+          brightness: Brightness.dark,
+          locale: Locale('fr', 'FR'),
+          primary: Color(0xFF006A60),
+          onPrimary: Color(0xFFFFFFFF),
+          primaryContainer: Color(0xFF9EF2E4),
+          onPrimaryContainer: Color(0xFF00201C),
+          surface: Color(0xFF151211),
+          surfaceContainerLow: Color(0xFF1E1A19),
+          surfaceContainer: Color(0xFF231F1E),
+          onSurface: Color(0xFFE9E1DF),
+          onSurfaceVariant: Color(0xFFCABFBC),
+          outlineVariant: Color(0xFF4A4543),
+          error: Color(0xFFFFB4AB),
+          onError: Color(0xFF690005),
+        ),
+      );
+
+      expect(platform.invocations.single.method, 'preferenceCenter.display');
+      expect(platform.invocations.single.arguments, {
+        'key': 'account',
+        'appearance': 'DARK',
+        'locale': 'fr-FR',
+        'material3': {
+          'primary': 0xFF006A60,
+          'onPrimary': 0xFFFFFFFF,
+          'primaryContainer': 0xFF9EF2E4,
+          'onPrimaryContainer': 0xFF00201C,
+          'surface': 0xFF151211,
+          'surfaceContainerLow': 0xFF1E1A19,
+          'surfaceContainer': 0xFF231F1E,
+          'onSurface': 0xFFE9E1DF,
+          'onSurfaceVariant': 0xFFCABFBC,
+          'outlineVariant': 0xFF4A4543,
+          'error': 0xFFFFB4AB,
+          'onError': 0xFF690005,
+        },
+      });
+    },
+  );
+
+  testWidgets(
+    'embedded preference center inherits Material theme and edits choices',
+    (tester) async {
+      const primary = Color(0xFF6750A4);
+      await tester.pumpWidget(
+        MaterialApp(
+          locale: const Locale('fr'),
+          theme: ThemeData(
+            colorScheme: ColorScheme.fromSeed(seedColor: primary),
+            useMaterial3: true,
+          ),
+          home: Builder(
+            builder: (context) => Localizations.override(
+              context: context,
+              locale: const Locale('fr'),
+              child: const Scaffold(
+                body: SafeArea(child: EngagePreferenceCenter()),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      expect(find.text('Aucune préférence pour le moment'), findsOneWidget);
+      expect(find.byIcon(Icons.tune_rounded), findsOneWidget);
+
+      platform.emit('preferenceCenter.center', {
+        'key': 'default',
+        'displayName': 'Communications',
+        'description':
+            'Choisissez les communications que vous souhaitez recevoir.',
+        'sections': [
+          {
+            'key': 'news',
+            'title': 'Actualités',
+            'description': null,
+            'subscriptions': [
+              {
+                'key': 'product.news',
+                'displayName': 'Nouveautés produit',
+                'description': 'Conseils et annonces',
+                'profileChoices': null,
+                'installationChoice': false,
+              },
+            ],
+          },
+        ],
+      }, scope: '');
+      await tester.pump();
+
+      expect(find.text('Actualités'), findsOneWidget);
+      expect(find.text('Nouveautés produit'), findsOneWidget);
+      await tester.tap(find.byType(Switch));
+      await tester.pump();
+
+      expect(
+        platform.invocations.any(
+          (call) => call.method == 'installation.editSubscriptions',
+        ),
+        isTrue,
+      );
+    },
+  );
 
   test(
     'Inbox entries keep the application payload flat and headless',

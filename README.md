@@ -307,15 +307,28 @@ if either bound is exceeded, it evicts the oldest entry of that queue.
 ## Preference Center
 
 ```dart
-await Engage.preferenceCenter.display();
+Navigator.of(context).push(
+  MaterialPageRoute(
+    builder: (_) => Scaffold(
+      appBar: AppBar(title: const Text('Communication preferences')),
+      body: const SafeArea(
+        top: false,
+        child: EngagePreferenceCenter(),
+      ),
+    ),
+  ),
+);
 
 Engage.preferenceCenter.center('mobile-notifications').listen((snapshot) {
   customPreferences.render(snapshot);
 });
 ```
 
-The ready-made UI and custom UI read the same native projection. Updates still
-go through `Engage.profile.editSubscriptions` and
+`EngagePreferenceCenter` owns only the ready-made content. The host owns the
+route, app bar, scaffold, and safe areas, exactly as it does for the embedded
+Message Center. The widget inherits the current Material 3 theme and locale.
+Ready-made and custom UIs read the same native projection; updates still go
+through `Engage.profile.editSubscriptions` and
 `Engage.installation.editSubscriptions`.
 
 ## Message Center
