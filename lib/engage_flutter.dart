@@ -38,6 +38,10 @@ export 'src/domain/engage_platform.dart'
     show EngagePlatform, EngageState, NativeMethodHandler;
 export 'src/domain/models.dart';
 export 'src/presentation/engage_in_app_placement.dart';
+export 'src/presentation/engage_localizations.dart';
+export 'src/presentation/engage_material_theme.dart';
+export 'src/presentation/engage_message_center.dart';
+export 'src/presentation/engage_preference_center.dart';
 
 abstract final class Engage {
   static EngageClient get _client => EngageRuntime.client;

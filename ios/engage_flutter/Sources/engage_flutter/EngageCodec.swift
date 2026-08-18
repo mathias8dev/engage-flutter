@@ -45,9 +45,20 @@ func engageConfig(_ value: FlutterMap) throws -> EngageConfig {
         endpoint.host != nil else {
     throw EngageFlutterCodecError.invalidArgument("Invalid HTTP(S) endpoint: \(endpointValue)")
   }
+  let legacyEndpoints = try value.list("legacyEndpoints").map { raw -> URL in
+    guard let endpointValue = raw as? String,
+          let endpoint = URL(string: endpointValue),
+          let scheme = endpoint.scheme?.lowercased(),
+          ["http", "https"].contains(scheme),
+          endpoint.host != nil else {
+      throw EngageFlutterCodecError.invalidArgument("Invalid legacy HTTP(S) endpoint: \(raw)")
+    }
+    return endpoint
+  }
   return EngageConfig(
     appKey: try value.string("appKey"),
     endpoint: endpoint,
+    legacyEndpoints: legacyEndpoints,
     push: PushConfig(
       foregroundPresentation: foreground,
       notificationCategories: categories
@@ -238,16 +249,7 @@ func flutterPreferenceCenter(_ center: PreferenceCenterSnapshot) -> FlutterMap {
 
 func flutterPagerState(_ state: InboxPagerState) -> FlutterMap {
   [
-    "entries": state.entries.map { entry in
-      [
-        "id": entry.id.value,
-        "key": entry.key,
-        "payload": entry.payload.mapValues(flutterValue),
-        "sentAt": iso8601(entry.sentAt),
-        "expiresAt": flutterOptional(entry.expiresAt.map(iso8601)),
-        "readAt": flutterOptional(entry.readAt.map(iso8601)),
-      ] as FlutterMap
-    },
+    "entries": state.entries.map(flutterInboxEntry),
     "isRefreshing": state.isRefreshing,
     "isLoadingMore": state.isLoadingMore,
     "hasMore": state.hasMore,
@@ -258,6 +260,17 @@ func flutterPagerState(_ state: InboxPagerState) -> FlutterMap {
         "isRetryable": error.isRetryable,
       ] as FlutterMap
     }),
+  ]
+}
+
+func flutterInboxEntry(_ entry: InboxEntry) -> FlutterMap {
+  [
+    "id": entry.id.value,
+    "key": entry.key,
+    "payload": entry.payload.mapValues(flutterValue),
+    "sentAt": iso8601(entry.sentAt),
+    "expiresAt": flutterOptional(entry.expiresAt.map(iso8601)),
+    "readAt": flutterOptional(entry.readAt.map(iso8601)),
   ]
 }
 

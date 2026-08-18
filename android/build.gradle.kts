@@ -9,7 +9,14 @@ val engageFlutterVersion = File(projectDir, "../pubspec.yaml")
             .trim()
             .substringBefore(' ')
     }
-val engageAndroidSdkVersion = "2.1.0"
+val engageAndroidSdkDefaultVersion = "2.2.1"
+val engageAndroidSdkVersion = providers.gradleProperty("engageAndroidSdkVersion")
+    .orElse(engageAndroidSdkDefaultVersion)
+    .get()
+val engageUseMavenLocalAndroidSdk = providers.gradleProperty("engageUseMavenLocalAndroidSdk")
+    .map(String::toBoolean)
+    .orElse(false)
+    .get()
 version = findProperty("engageFlutterVersion")?.toString() ?: engageFlutterVersion
 
 buildscript {
@@ -27,6 +34,9 @@ buildscript {
 
 allprojects {
     repositories {
+        if (engageUseMavenLocalAndroidSdk) {
+            mavenLocal()
+        }
         google()
         mavenCentral()
         maven("https://jitpack.io") {

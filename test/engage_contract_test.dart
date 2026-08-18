@@ -1,6 +1,8 @@
 import 'dart:async';
 
 import 'package:engage_flutter/engage_flutter.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'fake_engage_platform.dart';
@@ -18,6 +20,7 @@ void main() {
       config: const EngageConfig(
         appKey: 'eng_app_test',
         endpoint: 'https://edge.example.test/v1/',
+        legacyEndpoints: ['https://old-edge.example.test/v1/'],
         logLevel: EngageLogLevel.warning,
       ),
     );
@@ -32,6 +35,10 @@ void main() {
       platform.invocations.single.arguments,
       containsPair('logLevel', 'WARNING'),
     );
+    expect(
+      platform.invocations.single.arguments,
+      containsPair('legacyEndpoints', ['https://old-edge.example.test/v1/']),
+    );
   });
 
   test(
@@ -42,6 +49,22 @@ void main() {
           config: const EngageConfig(
             appKey: 'eng_app_test',
             endpoint: 'not-an-http-endpoint',
+          ),
+        ),
+        throwsArgumentError,
+      );
+      expect(platform.invocations, isEmpty);
+    },
+  );
+
+  test(
+    'start rejects an invalid legacy endpoint before crossing the bridge',
+    () async {
+      expect(
+        () => Engage.start(
+          config: const EngageConfig(
+            appKey: 'eng_app_test',
+            legacyEndpoints: ['not-an-http-endpoint'],
           ),
         ),
         throwsArgumentError,
@@ -133,22 +156,434 @@ void main() {
     final failing = FailingBackgroundPlatform();
     await Engage.usePlatformForTesting(failing);
     final uncaught = <Object>[];
+    late EngageState<PreferenceCenterResource> preferenceResource;
 
     await runZonedGuarded(() async {
       Engage.actions.register('open_order', (_) => ActionResult.completed);
-      Engage.preferenceCenter.center('account');
+      preferenceResource = Engage.preferenceCenter.resource('account');
       Engage.inApp.placement('home.hero');
       await Future<void>.delayed(Duration.zero);
     }, (error, _) => uncaught.add(error));
 
     expect(uncaught, isEmpty);
+    expect(
+      preferenceResource.value.status,
+      PreferenceCenterResourceStatus.error,
+    );
     expect(failing.invocations, hasLength(3));
   });
 
   test(
+    'preference center forwards the captured Material 3 environment',
+    () async {
+      await Engage.preferenceCenter.display(
+        key: 'account',
+        theme: const EngageMaterialTheme(
+          brightness: Brightness.dark,
+          locale: Locale('fr', 'FR'),
+          primary: Color(0xFF006A60),
+          onPrimary: Color(0xFFFFFFFF),
+          primaryContainer: Color(0xFF9EF2E4),
+          onPrimaryContainer: Color(0xFF00201C),
+          surface: Color(0xFF151211),
+          surfaceContainerLow: Color(0xFF1E1A19),
+          surfaceContainer: Color(0xFF231F1E),
+          onSurface: Color(0xFFE9E1DF),
+          onSurfaceVariant: Color(0xFFCABFBC),
+          outlineVariant: Color(0xFF4A4543),
+          error: Color(0xFFFFB4AB),
+          onError: Color(0xFF690005),
+        ),
+      );
+
+      expect(platform.invocations.single.method, 'preferenceCenter.display');
+      expect(platform.invocations.single.arguments, {
+        'key': 'account',
+        'appearance': 'DARK',
+        'locale': 'fr-FR',
+        'material3': {
+          'primary': 0xFF006A60,
+          'onPrimary': 0xFFFFFFFF,
+          'primaryContainer': 0xFF9EF2E4,
+          'onPrimaryContainer': 0xFF00201C,
+          'surface': 0xFF151211,
+          'surfaceContainerLow': 0xFF1E1A19,
+          'surfaceContainer': 0xFF231F1E,
+          'onSurface': 0xFFE9E1DF,
+          'onSurfaceVariant': 0xFFCABFBC,
+          'outlineVariant': 0xFF4A4543,
+          'error': 0xFFFFB4AB,
+          'onError': 0xFF690005,
+        },
+      });
+    },
+  );
+
+  test('preference center refresh crosses the native bridge', () async {
+    await Engage.preferenceCenter.refresh();
+
+    expect(platform.invocations.single.method, 'preferenceCenter.refresh');
+    expect(platform.invocations.single.arguments, isNull);
+  });
+
+  test(
+    'preference center resource owns refresh loading and success states',
+    () async {
+      final deferred = DeferredPreferenceRefreshPlatform();
+      await Engage.usePlatformForTesting(deferred);
+      final resource = Engage.preferenceCenter.resource();
+      await Future<void>.delayed(Duration.zero);
+
+      expect(resource.value.status, PreferenceCenterResourceStatus.success);
+
+      final refresh = Engage.preferenceCenter.refresh();
+      expect(resource.value.status, PreferenceCenterResourceStatus.loading);
+
+      deferred.refresh!.complete();
+      await refresh;
+      expect(resource.value.status, PreferenceCenterResourceStatus.success);
+    },
+  );
+
+  test(
+    'preference center remains loading until the native bridge replays a snapshot',
+    () async {
+      final noReplay = NoReplayPreferenceCenterPlatform();
+      await Engage.usePlatformForTesting(noReplay);
+
+      final resource = Engage.preferenceCenter.resource('account');
+      await Future<void>.delayed(Duration.zero);
+
+      expect(resource.value.status, PreferenceCenterResourceStatus.loading);
+      await Engage.preferenceCenter.refresh();
+      expect(resource.value.status, PreferenceCenterResourceStatus.loading);
+
+      noReplay.emit('preferenceCenter.center', null, scope: 'account');
+      expect(resource.value.status, PreferenceCenterResourceStatus.success);
+      expect(resource.value.data, isNull);
+    },
+  );
+
+  test(
+    'preference center projection shares one native observation per key',
+    () async {
+      final center = Engage.preferenceCenter.center('account');
+      final resource = Engage.preferenceCenter.resource('account');
+      await Future<void>.delayed(Duration.zero);
+
+      expect(
+        platform.invocations.where(
+          (call) => call.method == 'preferenceCenter.observe',
+        ),
+        hasLength(1),
+      );
+
+      platform.emit(
+        'preferenceCenter.center',
+        _preferenceCenterPayload(key: 'account'),
+        scope: 'account',
+      );
+
+      expect(center.value, same(resource.value.data));
+      expect(resource.value.data?.key, 'account');
+    },
+  );
+
+  test(
+    'preference center resource preserves stale data on refresh failure',
+    () async {
+      final failing = FailingPreferenceCenterRefreshPlatform();
+      await Engage.usePlatformForTesting(failing);
+      final resource = Engage.preferenceCenter.resource();
+      await Future<void>.delayed(Duration.zero);
+      failing.emit('preferenceCenter.center', _preferenceCenterPayload());
+
+      await expectLater(
+        Engage.preferenceCenter.refresh(),
+        throwsA(isA<StateError>()),
+      );
+
+      expect(resource.value.status, PreferenceCenterResourceStatus.error);
+      expect(resource.value.data?.key, 'default');
+      expect(resource.value.error, isA<StateError>());
+    },
+  );
+
+  test('preference center coalesces concurrent refresh requests', () async {
+    final deferred = DeferredPreferenceRefreshPlatform();
+    await Engage.usePlatformForTesting(deferred);
+
+    final first = Engage.preferenceCenter.refresh();
+    final second = Engage.preferenceCenter.refresh();
+
+    expect(identical(first, second), isTrue);
+    expect(
+      deferred.invocations.where(
+        (call) => call.method == 'preferenceCenter.refresh',
+      ),
+      hasLength(1),
+    );
+
+    deferred.refresh!.complete();
+    await Future.wait([first, second]);
+  });
+
+  testWidgets('embedded preference center supports pull refresh', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      const MaterialApp(home: Scaffold(body: EngagePreferenceCenter())),
+    );
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.text('No preferences yet'), findsOneWidget);
+    await tester.drag(find.byType(ListView), const Offset(0, 300));
+    await tester.pumpAndSettle();
+
+    expect(
+      platform.invocations.where(
+        (call) => call.method == 'preferenceCenter.refresh',
+      ),
+      hasLength(1),
+    );
+    expect(find.text('No preferences yet'), findsOneWidget);
+  });
+
+  testWidgets('embedded preference center exposes refresh errors and retry', (
+    tester,
+  ) async {
+    platform.deferPreferenceRefresh = true;
+    await tester.pumpWidget(
+      const MaterialApp(home: Scaffold(body: EngagePreferenceCenter())),
+    );
+    await tester.pump();
+
+    final failure = expectLater(
+      Engage.preferenceCenter.refresh(),
+      throwsA(isA<StateError>()),
+    );
+    platform.deferredPreferenceRefresh!.completeError(
+      StateError('refresh unavailable'),
+    );
+    await tester.pump();
+    await failure;
+    await tester.pump();
+
+    expect(find.text('Preferences unavailable'), findsOneWidget);
+    await tester.tap(find.text('Retry'));
+    await tester.pump();
+    platform.deferredPreferenceRefresh!.completeError(
+      StateError('refresh unavailable'),
+    );
+    await tester.pump();
+
+    expect(find.text('Preferences unavailable'), findsOneWidget);
+    expect(find.text('Retry'), findsOneWidget);
+  });
+
+  testWidgets(
+    'embedded preference center inherits Material theme and edits choices',
+    (tester) async {
+      const primary = Color(0xFF6750A4);
+      platform.deferSubscriptionEdits = true;
+      await tester.pumpWidget(
+        MaterialApp(
+          locale: const Locale('fr'),
+          localizationsDelegates: const [
+            EngageLocalizations.delegate,
+            GlobalMaterialLocalizations.delegate,
+            GlobalWidgetsLocalizations.delegate,
+            GlobalCupertinoLocalizations.delegate,
+          ],
+          supportedLocales: EngageLocalizations.supportedLocales,
+          theme: ThemeData(
+            colorScheme: ColorScheme.fromSeed(seedColor: primary),
+            useMaterial3: true,
+          ),
+          home: const Scaffold(body: SafeArea(child: EngagePreferenceCenter())),
+        ),
+      );
+
+      await tester.pump();
+      await tester.pump();
+      expect(find.text('Aucune préférence pour le moment'), findsOneWidget);
+      expect(find.byIcon(Icons.tune_rounded), findsOneWidget);
+
+      platform.emit('preferenceCenter.center', {
+        'key': 'default',
+        'displayName': 'Communications',
+        'description':
+            'Choisissez les communications que vous souhaitez recevoir.',
+        'sections': [
+          {
+            'key': 'news',
+            'title': 'Actualités',
+            'description': null,
+            'subscriptions': [
+              {
+                'key': 'product.news',
+                'displayName': 'Nouveautés produit',
+                'description': 'Conseils et annonces',
+                'profileChoices': null,
+                'installationChoice': false,
+              },
+            ],
+          },
+        ],
+      }, scope: '');
+      await tester.pump();
+
+      expect(find.text('Actualités'), findsOneWidget);
+      expect(find.text('Nouveautés produit'), findsOneWidget);
+      await tester.tap(find.byType(Switch));
+      await tester.pump();
+
+      expect(find.byType(CircularProgressIndicator), findsOneWidget);
+      platform.deferredSubscriptionEdit!.complete();
+      await tester.pump();
+
+      expect(
+        platform.invocations.any(
+          (call) => call.method == 'installation.editSubscriptions',
+        ),
+        isTrue,
+      );
+    },
+  );
+
+  testWidgets(
+    'embedded preference center changes center without accepting stale events',
+    (tester) async {
+      await tester.pumpWidget(
+        const MaterialApp(
+          home: Scaffold(body: EngagePreferenceCenter(centerKey: 'first')),
+        ),
+      );
+      await tester.pump();
+      platform.emit(
+        'preferenceCenter.center',
+        _preferenceCenterPayload(
+          key: 'first',
+          preferenceName: 'First preference',
+        ),
+        scope: 'first',
+      );
+      await tester.pump();
+      expect(find.text('First preference'), findsOneWidget);
+
+      await tester.pumpWidget(
+        const MaterialApp(
+          home: Scaffold(body: EngagePreferenceCenter(centerKey: 'second')),
+        ),
+      );
+      await tester.pump();
+      platform.emit(
+        'preferenceCenter.center',
+        _preferenceCenterPayload(
+          key: 'first',
+          preferenceName: 'Stale preference',
+        ),
+        scope: 'first',
+      );
+      platform.emit(
+        'preferenceCenter.center',
+        _preferenceCenterPayload(
+          key: 'second',
+          preferenceName: 'Second preference',
+        ),
+        scope: 'second',
+      );
+      await tester.pump();
+
+      expect(find.text('Stale preference'), findsNothing);
+      expect(find.text('Second preference'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'preference mutation state follows its stable key after server reorder',
+    (tester) async {
+      platform.deferSubscriptionEdits = true;
+      await tester.pumpWidget(
+        const MaterialApp(home: Scaffold(body: EngagePreferenceCenter())),
+      );
+      await tester.pump();
+      platform.emit(
+        'preferenceCenter.center',
+        _preferenceCenterPayload(
+          subscriptions: [
+            _installationPreference('first', 'First preference'),
+            _installationPreference('second', 'Second preference'),
+          ],
+        ),
+        scope: '',
+      );
+      await tester.pump();
+
+      final firstTile = find.ancestor(
+        of: find.text('First preference'),
+        matching: find.byType(ListTile),
+      );
+      await tester.tap(
+        find.descendant(of: firstTile, matching: find.byType(Switch)),
+      );
+      await tester.pump();
+      expect(
+        find.descendant(
+          of: firstTile,
+          matching: find.byType(CircularProgressIndicator),
+        ),
+        findsOneWidget,
+      );
+
+      platform.emit(
+        'preferenceCenter.center',
+        _preferenceCenterPayload(
+          subscriptions: [
+            _installationPreference('second', 'Second preference'),
+            _installationPreference('first', 'First preference'),
+          ],
+        ),
+        scope: '',
+      );
+      await tester.pump();
+
+      final reorderedFirstTile = find.ancestor(
+        of: find.text('First preference'),
+        matching: find.byType(ListTile),
+      );
+      final reorderedSecondTile = find.ancestor(
+        of: find.text('Second preference'),
+        matching: find.byType(ListTile),
+      );
+      expect(
+        find.descendant(
+          of: reorderedFirstTile,
+          matching: find.byType(CircularProgressIndicator),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: reorderedSecondTile,
+          matching: find.byType(CircularProgressIndicator),
+        ),
+        findsNothing,
+      );
+
+      platform.deferredSubscriptionEdit!.complete();
+      await tester.pump();
+    },
+  );
+
+  test(
     'Inbox entries keep the application payload flat and headless',
     () async {
-      final pager = Engage.messageCenter.inbox.pager(pageSize: 20);
+      final pager = Engage.messageCenter.inbox.pager(
+        pageSize: 20,
+        sortOrder: InboxSortOrder.oldestFirst,
+      );
       final states = <InboxPagerState>[];
       final subscription = pager.state.listen(states.add);
 
@@ -173,10 +608,51 @@ void main() {
       expect(entry.key, 'order.shipped');
       expect(entry.payload, {'order_id': 'order-42', 'carrier': 'DHL'});
       expect(entry.payload, isNot(contains('title')));
+      expect(platform.invocations.first.arguments, {
+        'pagerId': 'flutter-1',
+        'pageSize': 20,
+        'sortOrder': 'OLDEST_FIRST',
+      });
       await pager.close();
       await subscription.cancel();
     },
   );
+
+  test('Message Center display optionally targets a concrete entry', () async {
+    await Engage.messageCenter.display();
+    await Engage.messageCenter.display(entryId: InboxEntryId('entry-42'));
+
+    expect(platform.invocations[0].method, 'messageCenter.display');
+    expect(platform.invocations[0].arguments, isEmpty);
+    expect(platform.invocations[1].method, 'messageCenter.display');
+    expect(platform.invocations[1].arguments, {'entryId': 'entry-42'});
+  });
+
+  test('embedded Message Center widgets expose local navigation callbacks', () {
+    const layout = EngageMessageCenterLayout(
+      horizontalPadding: 20,
+      itemSpacing: 8,
+      itemCornerRadius: 16,
+    );
+    final list = EngageMessageCenterList(
+      onEntryTap: (_) {},
+      layout: layout,
+      sortOrder: InboxSortOrder.oldestFirst,
+    );
+    final detail = EngageMessageCenterDetail(
+      entryId: InboxEntryId('entry-42'),
+      layout: layout,
+    );
+
+    expect(list.onEntryTap, isNotNull);
+    expect(list.layout, same(layout));
+    expect(list.sortOrder, InboxSortOrder.oldestFirst);
+    expect(list.onError, isNull);
+    expect(detail.entryId.value, 'entry-42');
+    expect(detail.layout, same(layout));
+    expect(detail.onUnavailable, isNull);
+    expect(detail.onError, isNull);
+  });
 
   test(
     'Inbox pagers have independent windows and shared unread state',
@@ -281,6 +757,34 @@ void main() {
     },
   );
 }
+
+JsonMap _preferenceCenterPayload({
+  String key = 'default',
+  String preferenceName = 'Product news',
+  List<JsonMap>? subscriptions,
+}) => {
+  'key': key,
+  'displayName': 'Communications',
+  'description': 'Choose which communications you want to receive.',
+  'sections': [
+    {
+      'key': 'news',
+      'title': 'News',
+      'description': null,
+      'subscriptions':
+          subscriptions ??
+          [_installationPreference('product.news', preferenceName)],
+    },
+  ],
+};
+
+JsonMap _installationPreference(String key, String name) => {
+  'key': key,
+  'displayName': name,
+  'description': 'Tips and announcements',
+  'profileChoices': null,
+  'installationChoice': false,
+};
 
 JsonMap _pagerPayload(String id) => {
   'entries': [

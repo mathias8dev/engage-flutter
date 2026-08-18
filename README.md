@@ -83,6 +83,20 @@ binding codes, attribute values and payload values are never logged.
 second call with the same configuration is safe; the native SDK rejects a
 different App identity in the same process.
 
+When the same release both upgrades from endpoint-scoped native storage and changes the API
+endpoint, declare the previous endpoint so the native SDKs can move the correct App Key's durable
+state:
+
+```dart
+EngageConfig(
+  appKey: const String.fromEnvironment('ENGAGE_APP_KEY'),
+  endpoint: const String.fromEnvironment('ENGAGE_ENDPOINT'),
+  legacyEndpoints: [const String.fromEnvironment('PREVIOUS_ENGAGE_ENDPOINT')],
+)
+```
+
+This one-time migration option is unnecessary when the endpoint is unchanged.
+
 On Android, the first successful call also persists the validated native
 startup configuration. On later process starts, an Android initialization
 provider restores that configuration and starts the native SDK before a
@@ -293,15 +307,47 @@ if either bound is exceeded, it evicts the oldest entry of that queue.
 ## Preference Center
 
 ```dart
-await Engage.preferenceCenter.display();
+Navigator.of(context).push(
+  MaterialPageRoute(
+    builder: (_) => Scaffold(
+      appBar: AppBar(title: const Text('Communication preferences')),
+      body: const SafeArea(
+        top: false,
+        child: EngagePreferenceCenter(),
+      ),
+    ),
+  ),
+);
 
 Engage.preferenceCenter.center('mobile-notifications').listen((snapshot) {
   customPreferences.render(snapshot);
 });
+
+final resource = Engage.preferenceCenter.resource('mobile-notifications');
+resource.listen((state) {
+  switch (state.status) {
+    case PreferenceCenterResourceStatus.loading:
+      showLoading(state.data); // data may contain the last successful snapshot
+    case PreferenceCenterResourceStatus.success:
+      showPreferences(state.data);
+    case PreferenceCenterResourceStatus.error:
+      showRefreshError(state.error, staleData: state.data);
+  }
+});
+
+await Engage.preferenceCenter.refresh();
 ```
 
-The ready-made UI and custom UI read the same native projection. Updates still
-go through `Engage.profile.editSubscriptions` and
+`EngagePreferenceCenter` owns only the ready-made content. The host owns the
+route, app bar, scaffold, and safe areas, exactly as it does for the embedded
+Message Center. The widget inherits the current Material 3 theme and locale.
+It renders the resource state owned by `Engage.preferenceCenter`, supports
+pull-to-refresh, keeps stale content visible when a refresh fails, and shows a
+per-preference progress indicator while an edit is being accepted by the
+native SDK. Its built-in English and French copy can be replaced by registering
+a custom `LocalizationsDelegate<EngageLocalizations>` in the host application.
+Ready-made and custom UIs read the same native projection; updates still go
+through `Engage.profile.editSubscriptions` and
 `Engage.installation.editSubscriptions`.
 
 ## Message Center
@@ -310,7 +356,10 @@ Inbox entries are headless application data. There is no presentation model
 and no intermediate `Message` or `Payload` wrapper:
 
 ```dart
-final pager = Engage.messageCenter.inbox.pager(pageSize: 20);
+final pager = Engage.messageCenter.inbox.pager(
+  pageSize: 20,
+  sortOrder: InboxSortOrder.newestFirst,
+);
 
 final subscription = pager.state.listen((state) {
   for (final entry in state.entries) {
@@ -327,12 +376,80 @@ await subscription.cancel();
 
 Each pager owns an independent window. Its `EngageState` is hot, multicast and
 replays the latest state without starting one fetch per listener. Unread state
-is shared:
+is shared. Sorting is server-side on `sentAt`; changing the order creates an
+independent cursor window instead of reordering a partial local page:
 
 ```dart
 Engage.messageCenter.inbox.unreadCount.listen(updateBadge);
-await Engage.messageCenter.display(); // Optional Engage UI rendered with DivKit.
+await Engage.messageCenter.display();
+await Engage.messageCenter.display(entryId: InboxEntryId('entry-id'));
 ```
+
+`display()` opens the complete native UI. Applications that own their routes and
+app bars can embed only Engage's rendered content instead:
+
+```dart
+Navigator.of(context).push(
+  MaterialPageRoute(
+    builder: (_) => Scaffold(
+      appBar: AppBar(title: const Text('Messages')),
+      body: EngageMessageCenterList(
+        sortOrder: InboxSortOrder.newestFirst,
+        onEntryTap: (entry) {
+          Navigator.of(context).push(
+            MaterialPageRoute(
+              builder: (_) => Scaffold(
+                appBar: AppBar(title: const Text('Message')),
+                body: EngageMessageCenterDetail(entryId: entry.id),
+              ),
+            ),
+          );
+        },
+      ),
+    ),
+  ),
+);
+```
+
+The embedded widgets contain no `Scaffold`, `AppBar`, `Navigator`, Activity, or
+view controller. The list renders published `SUMMARY` snapshots and returns a
+typed `InboxEntry` to the local tap callback. The detail renders the matching
+immutable `DETAIL` snapshot and marks the entry read only after that content is
+visible. Both widgets follow the current Flutter locale and bridge the ambient
+Material 3 `ColorScheme` roles to their native controls, loading states, empty
+states, and fallback surfaces. Once a published snapshot is available, its
+native wrapper is transparent: DivKit alone owns its background, border,
+corners, clipping, and shadow. Host spacing can use the application's layout
+tokens:
+
+```dart
+EngageMessageCenterList(
+  layout: const EngageMessageCenterLayout(
+    horizontalPadding: 16,
+    itemSpacing: 8,
+    itemCornerRadius: 12,
+  ),
+  onEntryTap: openMessage,
+)
+```
+
+The ready-made list owns the destructive row interaction too. On Android, a
+swipe toward the start edge reveals the delete affordance and opens a native
+Material 3 confirmation dialog. Its surface, text, accent, and destructive
+colors come from the ambient Flutter `ColorScheme` already bridged to the
+native view. On iOS, trailing swipe actions expose delete and read-state
+changes without allowing a full swipe to execute deletion; selecting delete
+opens the native SwiftUI confirmation alert. In both cases, only explicit
+confirmation enters the durable native Inbox mutation queue and removes the
+entry optimistically from active views.
+
+Its native header displays the synchronized message and unread counts above a
+compact All/Unread segmented filter. `markAllRead()` remains available to
+applications using the headless Inbox API, but is not imposed in this compact
+ready-made header.
+
+Flutter applications using the headless API continue to receive only `key` and
+`payload` and may implement their own navigation and rendering.
 
 ## Feature flags
 
@@ -377,3 +494,18 @@ placements, unread count and pager states are all replaying multicast
 See [Architecture](doc/architecture.md) for the bridge boundaries and native
 ownership rules, and [Contract coverage](doc/contract-coverage.md) for the
 complete mapping to the mobile API.
+
+## Native Android composition check
+
+`mise run composition:android` verifies the complete published dependency graph: it publishes all
+five modules from the official `engage_android` monorepo to Maven Local under an isolated version,
+then compiles the Flutter Android bridge against those exact POMs and AARs. CI clones the Android
+tag pinned by this package. In a multi-repository checkout, the task uses the neighboring monorepo;
+when that checkout is ahead of the pinned release, opt in explicitly while preparing the next
+release:
+
+```shell
+ENGAGE_ALLOW_ANDROID_VERSION_MISMATCH=true mise run composition:android
+```
+
+This check never publishes a release or creates a tag.

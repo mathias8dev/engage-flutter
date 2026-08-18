@@ -1,5 +1,6 @@
 import Flutter
 import UIKit
+import SwiftUI
 import EngageSDK
 
 public final class EngageFlutterPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
@@ -48,6 +49,14 @@ public final class EngageFlutterPlugin: NSObject, FlutterPlugin, FlutterStreamHa
     registrar.register(
       EngageInAppViewFactory(),
       withId: "io.engage.flutter/in_app_placement"
+    )
+    registrar.register(
+      EngageMessageCenterListViewFactory(messenger: registrar.messenger()),
+      withId: "io.engage.flutter/message_center_list"
+    )
+    registrar.register(
+      EngageMessageCenterDetailViewFactory(messenger: registrar.messenger()),
+      withId: "io.engage.flutter/message_center_detail"
     )
     EngageLogger.info("Flutter", "iOS plugin registered channelsReady=true")
   }
@@ -174,8 +183,14 @@ public final class EngageFlutterPlugin: NSObject, FlutterPlugin, FlutterStreamHa
         case "preferenceCenter.observe":
           observePreferenceCenter(arguments["key"] as? String)
           result(nil)
+        case "preferenceCenter.refresh":
+          try await Engage.preferenceCenter.refresh()
+          result(nil)
         case "preferenceCenter.display":
-          Engage.preferenceCenter.display(arguments["key"] as? String)
+          Engage.preferenceCenter.display(
+            arguments["key"] as? String,
+            materialTheme: preferenceCenterMaterialTheme(arguments)
+          )
           result(nil)
         case "privacy.optIn":
           try await Engage.privacy.optIn()
@@ -202,12 +217,15 @@ public final class EngageFlutterPlugin: NSObject, FlutterPlugin, FlutterStreamHa
           observePlacement(try arguments.string("key"))
           result(nil)
         case "messageCenter.display":
-          Engage.messageCenter.display()
+          Engage.messageCenter.display(
+            entryId: (arguments["entryId"] as? String).map(InboxEntryId.init)
+          )
           result(nil)
         case "messageCenter.pager.create":
           createPager(
             id: try arguments.string("pagerId"),
-            pageSize: (arguments["pageSize"] as? NSNumber)?.intValue ?? 20
+            pageSize: (arguments["pageSize"] as? NSNumber)?.intValue ?? 20,
+            sortOrder: inboxSortOrder(arguments)
           )
           result(nil)
         case "messageCenter.pager.refresh":
@@ -403,13 +421,13 @@ public final class EngageFlutterPlugin: NSObject, FlutterPlugin, FlutterStreamHa
     }
   }
 
-  private func createPager(id: String, pageSize: Int) {
+  private func createPager(id: String, pageSize: Int, sortOrder: InboxSortOrder) {
     guard pagers[id] == nil else {
       EngageLogger.verbose("Flutter", "message center pager reused id=\(id)")
       return
     }
     EngageLogger.debug("Flutter", "message center pager created id=\(id) pageSize=\(pageSize)")
-    let inboxPager = Engage.messageCenter.inbox.pager(pageSize: pageSize)
+    let inboxPager = Engage.messageCenter.inbox.pager(pageSize: pageSize, sortOrder: sortOrder)
     let task = Task { [weak self] in
       for await value in inboxPager.state.updates {
         self?.emit(key: "messageCenter.pager", value: flutterPagerState(value), scope: id)
@@ -644,4 +662,276 @@ private final class EngageInAppPlatformView: NSObject, FlutterPlatformView {
   }
 
   func view() -> UIView { content }
+}
+
+private final class EngageMessageCenterListViewFactory: NSObject, FlutterPlatformViewFactory {
+  private let messenger: FlutterBinaryMessenger
+
+  init(messenger: FlutterBinaryMessenger) {
+    self.messenger = messenger
+  }
+
+  func create(
+    withFrame frame: CGRect,
+    viewIdentifier viewId: Int64,
+    arguments args: Any?
+  ) -> FlutterPlatformView {
+    let channel = FlutterMethodChannel(
+      name: "io.engage.flutter/message_center_list/\(viewId)",
+      binaryMessenger: messenger
+    )
+    let environment = messageCenterEnvironment(args)
+    let readiness = EngagePlatformViewReadiness()
+    let content = EngageReadyPlatformContent(readiness: readiness) {
+      EngageMessageCenterListView(
+        sortOrder: inboxSortOrder(args),
+        materialTheme: environment.materialTheme,
+        layout: environment.layout,
+        onEntryTap: { entry in channel.invokeMethod("entryTap", arguments: flutterInboxEntry(entry)) },
+        onError: { error in channel.invokeMethod("error", arguments: flutterMessageCenterError(error)) }
+      )
+      .environment(\.colorScheme, environment.colorScheme)
+      .environment(\.locale, environment.locale)
+    }
+    return EngageHostingPlatformView(
+      frame: frame,
+      content: content,
+      channel: channel,
+      onReady: { readiness.isReady = true }
+    )
+  }
+
+  func createArgsCodec() -> FlutterMessageCodec & NSObjectProtocol {
+    FlutterStandardMessageCodec.sharedInstance()
+  }
+}
+
+private final class EngageMessageCenterDetailViewFactory: NSObject, FlutterPlatformViewFactory {
+  private let messenger: FlutterBinaryMessenger
+
+  init(messenger: FlutterBinaryMessenger) {
+    self.messenger = messenger
+  }
+
+  func create(
+    withFrame frame: CGRect,
+    viewIdentifier viewId: Int64,
+    arguments args: Any?
+  ) -> FlutterPlatformView {
+    let arguments = args as? FlutterMap ?? [:]
+    let entryId = InboxEntryId(arguments["entryId"] as? String ?? "")
+    let channel = FlutterMethodChannel(
+      name: "io.engage.flutter/message_center_detail/\(viewId)",
+      binaryMessenger: messenger
+    )
+    let environment = messageCenterEnvironment(args)
+    let readiness = EngagePlatformViewReadiness()
+    let content = EngageReadyPlatformContent(readiness: readiness) {
+      EngageMessageCenterDetailView(
+        entryId: entryId,
+        materialTheme: environment.materialTheme,
+        onUnavailable: { channel.invokeMethod("unavailable", arguments: nil) },
+        onError: { error in channel.invokeMethod("error", arguments: flutterMessageCenterError(error)) }
+      )
+      .environment(\.colorScheme, environment.colorScheme)
+      .environment(\.locale, environment.locale)
+    }
+    return EngageHostingPlatformView(
+      frame: frame,
+      content: content,
+      channel: channel,
+      onReady: { readiness.isReady = true }
+    )
+  }
+
+  func createArgsCodec() -> FlutterMessageCodec & NSObjectProtocol {
+    FlutterStandardMessageCodec.sharedInstance()
+  }
+}
+
+private final class EngageHostingPlatformView<Content: View>: NSObject, FlutterPlatformView {
+  private let container: EngageHostingContainerView
+  private let channel: FlutterMethodChannel
+
+  init(
+    frame: CGRect,
+    content: Content,
+    channel: FlutterMethodChannel,
+    onReady: @escaping () -> Void
+  ) {
+    container = EngageHostingContainerView(frame: frame, content: content)
+    self.channel = channel
+    super.init()
+    channel.setMethodCallHandler { call, result in
+      if call.method == "ready" {
+        onReady()
+        result(nil)
+      }
+      else { result(FlutterMethodNotImplemented) }
+    }
+  }
+
+  func view() -> UIView { container }
+
+  deinit { channel.setMethodCallHandler(nil) }
+}
+
+private final class EngagePlatformViewReadiness: ObservableObject {
+  @Published var isReady = false
+}
+
+private struct EngageReadyPlatformContent<Content: View>: View {
+  @ObservedObject var readiness: EngagePlatformViewReadiness
+  let content: () -> Content
+
+  init(readiness: EngagePlatformViewReadiness, @ViewBuilder content: @escaping () -> Content) {
+    self.readiness = readiness
+    self.content = content
+  }
+
+  @ViewBuilder var body: some View {
+    if readiness.isReady { content() }
+  }
+}
+
+private final class EngageHostingContainerView: UIView {
+  private let controller: UIViewController
+  private weak var attachedParent: UIViewController?
+
+  init<Content: View>(frame: CGRect, content: Content) {
+    controller = UIHostingController(rootView: content)
+    super.init(frame: frame)
+    controller.view.backgroundColor = .clear
+    controller.view.translatesAutoresizingMaskIntoConstraints = false
+    addSubview(controller.view)
+    NSLayoutConstraint.activate([
+      controller.view.leadingAnchor.constraint(equalTo: leadingAnchor),
+      controller.view.trailingAnchor.constraint(equalTo: trailingAnchor),
+      controller.view.topAnchor.constraint(equalTo: topAnchor),
+      controller.view.bottomAnchor.constraint(equalTo: bottomAnchor),
+    ])
+  }
+
+  @available(*, unavailable)
+  required init?(coder: NSCoder) { nil }
+
+  override func didMoveToWindow() {
+    super.didMoveToWindow()
+    if window == nil {
+      detachController()
+    } else {
+      attachControllerIfNeeded()
+    }
+  }
+
+  private func attachControllerIfNeeded() {
+    guard attachedParent == nil else { return }
+    var responder: UIResponder? = self
+    while let current = responder {
+      if let parent = current as? UIViewController {
+        parent.addChild(controller)
+        controller.didMove(toParent: parent)
+        attachedParent = parent
+        return
+      }
+      responder = current.next
+    }
+  }
+
+  private func detachController() {
+    guard attachedParent != nil else { return }
+    controller.willMove(toParent: nil)
+    controller.removeFromParent()
+    attachedParent = nil
+  }
+}
+
+private struct MessageCenterEnvironment {
+  let colorScheme: ColorScheme
+  let locale: Locale
+  let materialTheme: MessageCenterMaterialTheme
+  let layout: MessageCenterViewLayout
+}
+
+private func inboxSortOrder(_ args: Any?) -> InboxSortOrder {
+  let arguments = args as? FlutterMap ?? [:]
+  return arguments["sortOrder"] as? String == "OLDEST_FIRST" ? .oldestFirst : .newestFirst
+}
+
+private func messageCenterEnvironment(_ args: Any?) -> MessageCenterEnvironment {
+  let arguments = args as? FlutterMap ?? [:]
+  let material = arguments["material3"] as? FlutterMap ?? [:]
+  let layout = arguments["layout"] as? FlutterMap ?? [:]
+  func color(_ key: String, fallback: Color) -> Color {
+    guard let number = material[key] as? NSNumber else { return fallback }
+    let argb = UInt32(truncating: number)
+    return Color(
+      red: Double((argb >> 16) & 0xFF) / 255,
+      green: Double((argb >> 8) & 0xFF) / 255,
+      blue: Double(argb & 0xFF) / 255,
+      opacity: Double((argb >> 24) & 0xFF) / 255
+    )
+  }
+  func dimension(_ key: String, fallback: CGFloat) -> CGFloat {
+    (layout[key] as? NSNumber).map(CGFloat.init(truncating:)) ?? fallback
+  }
+  let defaultTheme = MessageCenterMaterialTheme.system
+  let defaultLayout = MessageCenterViewLayout.default
+  return MessageCenterEnvironment(
+    colorScheme: (arguments["appearance"] as? String) == "DARK" ? .dark : .light,
+    locale: Locale(identifier: arguments["locale"] as? String ?? Locale.current.identifier),
+    materialTheme: MessageCenterMaterialTheme(
+      primary: color("primary", fallback: defaultTheme.primary),
+      onPrimary: color("onPrimary", fallback: defaultTheme.onPrimary),
+      primaryContainer: color("primaryContainer", fallback: defaultTheme.primaryContainer),
+      surface: color("surface", fallback: defaultTheme.surface),
+      surfaceContainerLow: color("surfaceContainerLow", fallback: defaultTheme.surfaceContainerLow),
+      surfaceContainer: color("surfaceContainer", fallback: defaultTheme.surfaceContainer),
+      onSurface: color("onSurface", fallback: defaultTheme.onSurface),
+      onSurfaceVariant: color("onSurfaceVariant", fallback: defaultTheme.onSurfaceVariant),
+      outlineVariant: color("outlineVariant", fallback: defaultTheme.outlineVariant),
+      error: color("error", fallback: defaultTheme.error),
+      onError: color("onError", fallback: defaultTheme.onError)
+    ),
+    layout: MessageCenterViewLayout(
+      horizontalPadding: dimension("horizontalPadding", fallback: defaultLayout.horizontalPadding),
+      itemSpacing: dimension("itemSpacing", fallback: defaultLayout.itemSpacing),
+      itemCornerRadius: dimension("itemCornerRadius", fallback: defaultLayout.itemCornerRadius)
+    )
+  )
+}
+
+@MainActor
+private func preferenceCenterMaterialTheme(_ arguments: FlutterMap) -> PreferenceCenterMaterialTheme {
+  let material = arguments["material3"] as? FlutterMap ?? [:]
+  let defaults = PreferenceCenterMaterialTheme.system
+  func color(_ key: String, fallback: UIColor) -> UIColor {
+    guard let number = material[key] as? NSNumber else { return fallback }
+    let argb = UInt32(truncating: number)
+    return UIColor(
+      red: CGFloat((argb >> 16) & 0xFF) / 255,
+      green: CGFloat((argb >> 8) & 0xFF) / 255,
+      blue: CGFloat(argb & 0xFF) / 255,
+      alpha: CGFloat((argb >> 24) & 0xFF) / 255
+    )
+  }
+  return PreferenceCenterMaterialTheme(
+    primary: color("primary", fallback: defaults.primary),
+    onPrimary: color("onPrimary", fallback: defaults.onPrimary),
+    primaryContainer: color("primaryContainer", fallback: defaults.primaryContainer),
+    onPrimaryContainer: color("onPrimaryContainer", fallback: defaults.onPrimaryContainer),
+    surface: color("surface", fallback: defaults.surface),
+    surfaceContainerLow: color("surfaceContainerLow", fallback: defaults.surfaceContainerLow),
+    onSurface: color("onSurface", fallback: defaults.onSurface),
+    onSurfaceVariant: color("onSurfaceVariant", fallback: defaults.onSurfaceVariant),
+    outlineVariant: color("outlineVariant", fallback: defaults.outlineVariant)
+  )
+}
+
+private func flutterMessageCenterError(_ error: MessageCenterViewError) -> FlutterMap {
+  [
+    "code": error.code == .inbox ? "INBOX" : "RENDERING",
+    "message": error.message,
+    "isRetryable": error.isRetryable,
+  ]
 }

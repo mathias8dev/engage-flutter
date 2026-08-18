@@ -58,6 +58,7 @@ internal fun FlutterMap.toEngageConfig(context: Context): EngageConfig {
     return EngageConfig(
         appKey = string("appKey"),
         endpoint = URI.create(string("endpoint")),
+        legacyEndpoints = this["legacyEndpoints"].asList().map { URI.create(it as String) },
         logLevel = when (val raw = this["logLevel"] as? String ?: "INFO") {
             "WARNING" -> EngageLogLevel.WARN
             else -> enumValue(raw)
@@ -235,7 +236,7 @@ internal fun InboxPagerState.toFlutter(): FlutterMap = mapOf(
     "error" to error?.toFlutter(),
 )
 
-private fun InboxEntry.toFlutter(): FlutterMap = mapOf(
+internal fun InboxEntry.toFlutter(): FlutterMap = mapOf(
     "id" to id.value,
     "key" to key,
     "payload" to payload.toFlutter(),

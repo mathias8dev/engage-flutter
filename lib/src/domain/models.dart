@@ -129,12 +129,19 @@ final class EngageConfig {
   const EngageConfig({
     required this.appKey,
     this.endpoint = 'https://api.engage.io/v1/',
+    this.legacyEndpoints = const [],
     this.push = const PushConfig(),
     this.logLevel = EngageLogLevel.info,
   });
 
   final String appKey;
   final String endpoint;
+
+  /// Previous endpoints whose endpoint-scoped native storage belongs to this App Key.
+  ///
+  /// This is only needed when changing the endpoint in the same release that adopts stable
+  /// App-Key-scoped native storage. The current [endpoint] is considered automatically.
+  final List<String> legacyEndpoints;
   final PushConfig push;
   final EngageLogLevel logLevel;
 }
@@ -153,6 +160,8 @@ enum SdkFeature {
 }
 
 enum PrivacyState { optedIn, optedOut }
+
+enum InboxSortOrder { newestFirst, oldestFirst }
 
 enum PushSubscriptionState { optedIn, optedOut }
 
@@ -336,6 +345,36 @@ final class PreferenceCenterSnapshot {
   final String displayName;
   final String? description;
   final List<PreferenceSection> sections;
+}
+
+enum PreferenceCenterResourceStatus { loading, success, error }
+
+/// Current Preference Center data and the state of its native synchronization.
+final class PreferenceCenterResource {
+  const PreferenceCenterResource._({
+    required this.status,
+    this.data,
+    this.error,
+  });
+
+  const PreferenceCenterResource.loading([PreferenceCenterSnapshot? data])
+    : this._(status: PreferenceCenterResourceStatus.loading, data: data);
+
+  const PreferenceCenterResource.success(PreferenceCenterSnapshot? data)
+    : this._(status: PreferenceCenterResourceStatus.success, data: data);
+
+  const PreferenceCenterResource.error(
+    Object error, [
+    PreferenceCenterSnapshot? data,
+  ]) : this._(
+         status: PreferenceCenterResourceStatus.error,
+         data: data,
+         error: error,
+       );
+
+  final PreferenceCenterResourceStatus status;
+  final PreferenceCenterSnapshot? data;
+  final Object? error;
 }
 
 final class PreferenceSection {

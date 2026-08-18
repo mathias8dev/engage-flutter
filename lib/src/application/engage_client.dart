@@ -4,6 +4,8 @@ import '../domain/editors.dart';
 import '../domain/engage_platform.dart';
 import '../domain/engage_logging.dart';
 import '../domain/models.dart';
+import '../infrastructure/message_center_codec.dart';
+import '../presentation/engage_material_theme.dart';
 
 typedef ActionHandler = FutureOr<ActionResult> Function(EngageAction action);
 typedef InAppOverlayDisplayDelegate =
@@ -388,36 +390,130 @@ final class PreferenceCenterApi {
   PreferenceCenterApi._(this._platform);
 
   final EngagePlatform _platform;
-  final Map<String, EngageState<PreferenceCenterSnapshot?>> _centers = {};
+  final Map<String, _PreferenceCenterRegistration> _registrations = {};
+  bool _refreshing = false;
+  Future<void>? _activeRefresh;
 
-  EngageState<PreferenceCenterSnapshot?> center([String? key]) {
+  EngageState<PreferenceCenterSnapshot?> center([String? key]) =>
+      _registration(key).center;
+
+  EngageState<PreferenceCenterResource> resource([String? key]) =>
+      _registration(key).resource;
+
+  _PreferenceCenterRegistration _registration(String? key) {
     if (key != null) validateProductKey(key, label: 'preference center key');
     final scope = key ?? '';
-    return _centers.putIfAbsent(scope, () {
-      EngageLog.info(
-        'Preferences',
-        'center subscribed key=${key ?? 'default'}',
+    final existing = _registrations[scope];
+    if (existing != null) return existing;
+    EngageLog.info('Preferences', 'center subscribed key=${key ?? 'default'}');
+    final registration = _PreferenceCenterRegistration();
+    _registrations[scope] = registration;
+    _observe(key: key, registration: registration);
+    return registration;
+  }
+
+  Future<void> refresh() {
+    final active = _activeRefresh;
+    if (active != null) return active;
+    late final Future<void> operation;
+    operation = _performRefresh().whenComplete(() {
+      if (identical(_activeRefresh, operation)) _activeRefresh = null;
+    });
+    _activeRefresh = operation;
+    return operation;
+  }
+
+  Future<void> _performRefresh() async {
+    EngageLog.info('Preferences', 'manual refresh requested');
+    _refreshing = true;
+    for (final registration in _registrations.values) {
+      registration.resource.set(
+        PreferenceCenterResource.loading(registration.center.value),
       );
-      final state = EngageState<PreferenceCenterSnapshot?>(null);
-      _invokeInBackground(_platform, 'preferenceCenter.observe', {'key': key});
-      return state;
+    }
+    try {
+      await _platform.invoke('preferenceCenter.refresh');
+      for (final registration in _registrations.values) {
+        registration.resource.set(
+          registration.hasSnapshot
+              ? PreferenceCenterResource.success(registration.center.value)
+              : PreferenceCenterResource.loading(registration.center.value),
+        );
+      }
+      EngageLog.info('Preferences', 'manual refresh completed');
+    } on Object catch (error, stackTrace) {
+      for (final registration in _registrations.values) {
+        registration.resource.set(
+          PreferenceCenterResource.error(error, registration.center.value),
+        );
+      }
+      EngageLog.error(
+        'Preferences',
+        'manual refresh failed',
+        error: error,
+        stackTrace: stackTrace,
+      );
+      rethrow;
+    } finally {
+      _refreshing = false;
+    }
+  }
+
+  void _observe({
+    required String? key,
+    required _PreferenceCenterRegistration registration,
+  }) {
+    unawaited(() async {
+      try {
+        await _platform.invoke('preferenceCenter.observe', {'key': key});
+      } on Object catch (error, stackTrace) {
+        registration.resource.set(
+          PreferenceCenterResource.error(error, registration.center.value),
+        );
+        EngageLog.error(
+          'Preferences',
+          'center observation failed key=${key ?? 'default'}',
+          error: error,
+          stackTrace: stackTrace,
+        );
+      }
+    }());
+  }
+
+  Future<void> display({String? key, EngageMaterialTheme? theme}) {
+    if (key != null) validateProductKey(key, label: 'preference center key');
+    EngageLog.info('Preferences', 'display requested key=${key ?? 'default'}');
+    return _platform.invoke('preferenceCenter.display', {
+      'key': key,
+      ...?theme?.toPlatform(),
     });
   }
 
-  Future<void> display([String? key]) {
-    if (key != null) validateProductKey(key, label: 'preference center key');
-    EngageLog.info('Preferences', 'display requested key=${key ?? 'default'}');
-    return _platform.invoke('preferenceCenter.display', {'key': key});
-  }
-
   void _update(String? scope, Object? value) {
-    final state = _centers[scope ?? ''];
-    state?.set(value == null ? null : _preferenceCenter(_map(value)));
+    final identity = scope ?? '';
+    final registration = _registrations[identity];
+    if (registration == null) return;
+    final center = value == null ? null : _preferenceCenter(_map(value));
+    registration.hasSnapshot = true;
+    registration.center.set(center);
+    registration.resource.set(
+      _refreshing
+          ? PreferenceCenterResource.loading(center)
+          : PreferenceCenterResource.success(center),
+    );
     EngageLog.debug(
       'Preferences',
       'center updated key=${scope?.isEmpty ?? true ? 'default' : scope} available=${value != null}',
     );
   }
+}
+
+final class _PreferenceCenterRegistration {
+  bool hasSnapshot = false;
+  final EngageState<PreferenceCenterSnapshot?> center = EngageState(null);
+  final EngageState<PreferenceCenterResource> resource = EngageState(
+    const PreferenceCenterResource.loading(),
+  );
 }
 
 final class PrivacyApi {
@@ -612,7 +708,10 @@ final class InboxApi {
   final Map<String, _InboxPager> _pagers = {};
   int _nextPagerId = 0;
 
-  InboxPager pager({int pageSize = 20}) {
+  InboxPager pager({
+    int pageSize = 20,
+    InboxSortOrder sortOrder = InboxSortOrder.newestFirst,
+  }) {
     if (pageSize < 1 || pageSize > 100) {
       throw ArgumentError.value(
         pageSize,
@@ -621,11 +720,18 @@ final class InboxApi {
       );
     }
     final id = 'flutter-${++_nextPagerId}';
-    EngageLog.info('MessageCenter', 'pager creating id=$id pageSize=$pageSize');
+    EngageLog.info(
+      'MessageCenter',
+      'pager creating id=$id pageSize=$pageSize sortOrder=${sortOrder.name}',
+    );
     final created = _platform
         .invoke('messageCenter.pager.create', {
           'pagerId': id,
           'pageSize': pageSize,
+          'sortOrder': switch (sortOrder) {
+            InboxSortOrder.newestFirst => 'NEWEST_FIRST',
+            InboxSortOrder.oldestFirst => 'OLDEST_FIRST',
+          },
         })
         .then<void>((_) {});
     final pager = _InboxPager(
@@ -675,9 +781,14 @@ final class MessageCenterApi {
   final EngagePlatform _platform;
   final InboxApi inbox;
 
-  Future<void> display() {
-    EngageLog.info('MessageCenter', 'display requested');
-    return _platform.invoke('messageCenter.display');
+  Future<void> display({InboxEntryId? entryId}) {
+    EngageLog.info(
+      'MessageCenter',
+      'display requested entryId=${entryId?.value ?? 'list'}',
+    );
+    return _platform.invoke('messageCenter.display', {
+      if (entryId != null) 'entryId': entryId.value,
+    });
   }
 }
 
@@ -699,6 +810,18 @@ void _validateConfig(EngageConfig config) {
       'must be an absolute HTTP(S) URL',
     );
   }
+  for (final legacyEndpointValue in config.legacyEndpoints) {
+    final legacyEndpoint = Uri.tryParse(legacyEndpointValue);
+    if (legacyEndpoint == null ||
+        !legacyEndpoint.hasAuthority ||
+        (legacyEndpoint.scheme != 'https' && legacyEndpoint.scheme != 'http')) {
+      throw ArgumentError.value(
+        legacyEndpointValue,
+        'legacyEndpoints',
+        'must contain only absolute HTTP(S) URLs',
+      );
+    }
+  }
   final android = config.push.android;
   if (android != null &&
       !android.channels.any(
@@ -713,6 +836,7 @@ void _validateConfig(EngageConfig config) {
 JsonMap _encodeConfig(EngageConfig config) => {
   'appKey': config.appKey,
   'endpoint': config.endpoint,
+  'legacyEndpoints': config.legacyEndpoints,
   'logLevel': enumWire(config.logLevel),
   'push': {
     'foregroundPresentation': enumWire(config.push.foregroundPresentation),
@@ -927,20 +1051,11 @@ SubscriptionPreference _subscriptionPreference(JsonMap value) =>
 InboxPagerState _inboxPagerState(JsonMap value) => InboxPagerState(
   entries: _list(
     value['entries'],
-  ).map((entry) => _inboxEntry(_map(entry))).toList(growable: false),
+  ).map(decodeInboxEntry).toList(growable: false),
   isRefreshing: value['isRefreshing'] as bool? ?? false,
   isLoadingMore: value['isLoadingMore'] as bool? ?? false,
   hasMore: value['hasMore'] as bool? ?? false,
   error: value['error'] == null ? null : _inboxError(_map(value['error'])),
-);
-
-InboxEntry _inboxEntry(JsonMap value) => InboxEntry(
-  id: InboxEntryId(value['id']! as String),
-  key: value['key']! as String,
-  payload: _map(value['payload']),
-  sentAt: DateTime.parse(value['sentAt']! as String),
-  expiresAt: (value['expiresAt'] as String?)?.let(DateTime.parse),
-  readAt: (value['readAt'] as String?)?.let(DateTime.parse),
 );
 
 InboxError _inboxError(JsonMap value) => InboxError(

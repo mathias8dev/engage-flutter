@@ -2,18 +2,26 @@ package io.engage.engage_flutter
 
 import android.content.Context
 import android.content.Intent
+import android.content.res.Configuration
+import android.view.ContextThemeWrapper
 import android.view.View
 import io.engage.sdk.*
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.embedding.engine.plugins.activity.ActivityAware
 import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding
 import io.flutter.plugin.common.EventChannel
+import io.flutter.plugin.common.BinaryMessenger
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import io.flutter.plugin.common.PluginRegistry.NewIntentListener
 import io.flutter.plugin.platform.PlatformView
 import io.flutter.plugin.platform.PlatformViewFactory
 import io.flutter.plugin.common.StandardMessageCodec
+import io.engage.sdk.messagecenter.divkit.MessageCenterViewError
+import io.engage.sdk.messagecenter.divkit.MessageCenterMaterialTheme
+import io.engage.sdk.messagecenter.divkit.MessageCenterViewLayout
+import io.engage.sdk.messagecenter.divkit.render.EngageMessageCenterDetailView
+import io.engage.sdk.messagecenter.divkit.render.EngageMessageCenterListView
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
@@ -27,6 +35,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import java.util.concurrent.ConcurrentHashMap
+import java.util.Locale
 import kotlin.coroutines.resume
 
 public class EngageFlutterPlugin :
@@ -68,6 +77,14 @@ public class EngageFlutterPlugin :
         binding.platformViewRegistry.registerViewFactory(
             IN_APP_VIEW,
             EngageInAppViewFactory(),
+        )
+        binding.platformViewRegistry.registerViewFactory(
+            MESSAGE_CENTER_LIST_VIEW,
+            EngageMessageCenterListViewFactory(binding.binaryMessenger),
+        )
+        binding.platformViewRegistry.registerViewFactory(
+            MESSAGE_CENTER_DETAIL_VIEW,
+            EngageMessageCenterDetailViewFactory(binding.binaryMessenger),
         )
         EngageLogger.info("Flutter", "Android plugin attached channelsReady=true")
     }
@@ -125,9 +142,10 @@ public class EngageFlutterPlugin :
                     arguments["default"].toJsonElement(),
                 ).toFlutter()
                 "preferenceCenter.observe" -> observePreferenceCenter(arguments["key"] as String?)
-                "preferenceCenter.display" -> (arguments["key"] as String?)
-                    ?.let(Engage.preferenceCenter::display)
-                    ?: Engage.preferenceCenter.display()
+                "preferenceCenter.refresh" -> Engage.preferenceCenter.refresh()
+                "preferenceCenter.display" -> Engage.preferenceCenter.display(
+                    applicationContext.preferenceCenterDisplayOptions(arguments),
+                )
                 "privacy.optIn" -> Engage.privacy.optIn()
                 "privacy.optOut" -> Engage.privacy.optOut()
                 "privacy.optOutAndWipe" -> Engage.privacy.optOutAndWipe()
@@ -136,10 +154,13 @@ public class EngageFlutterPlugin :
                 "inApp.overlays.pause" -> Engage.inApp.overlays.pause()
                 "inApp.overlays.resume" -> Engage.inApp.overlays.resume()
                 "inApp.observePlacement" -> observePlacement(arguments.string("key"))
-                "messageCenter.display" -> Engage.messageCenter.display()
+                "messageCenter.display" -> (arguments["entryId"] as? String)
+                    ?.let { Engage.messageCenter.display(InboxEntryId(it)) }
+                    ?: Engage.messageCenter.display()
                 "messageCenter.pager.create" -> createPager(
                     arguments.string("pagerId"),
                     (arguments["pageSize"] as Number).toInt(),
+                    arguments.inboxSortOrder(),
                 )
                 "messageCenter.pager.refresh" -> pager(arguments).refresh()
                 "messageCenter.pager.loadNextPage" -> pager(arguments).loadNextPage()
@@ -304,13 +325,13 @@ public class EngageFlutterPlugin :
         }
     }
 
-    private fun createPager(id: String, pageSize: Int) {
+    private fun createPager(id: String, pageSize: Int, sortOrder: InboxSortOrder) {
         if (pagers.containsKey(id)) {
             EngageLogger.verbose("Flutter", "message center pager reused id=$id")
             return
         }
         EngageLogger.debug("Flutter", "message center pager created id=$id pageSize=$pageSize")
-        val inboxPager = Engage.messageCenter.inbox.pager(pageSize)
+        val inboxPager = Engage.messageCenter.inbox.pager(pageSize, sortOrder)
         val job = scope.launch {
             inboxPager.state.collect { emit("messageCenter.pager", it.toFlutter(), id) }
         }
@@ -468,6 +489,8 @@ public class EngageFlutterPlugin :
         const val METHODS_CHANNEL = "io.engage.flutter/methods"
         const val EVENTS_CHANNEL = "io.engage.flutter/events"
         const val IN_APP_VIEW = "io.engage.flutter/in_app_placement"
+        const val MESSAGE_CENTER_LIST_VIEW = "io.engage.flutter/message_center_list"
+        const val MESSAGE_CENTER_DETAIL_VIEW = "io.engage.flutter/message_center_detail"
     }
 }
 
@@ -539,4 +562,161 @@ private class EngageInAppViewFactory : PlatformViewFactory(StandardMessageCodec.
             }
         }
     }
+}
+
+private class EngageMessageCenterListViewFactory(
+    private val messenger: BinaryMessenger,
+) : PlatformViewFactory(StandardMessageCodec.INSTANCE) {
+    override fun create(context: Context, viewId: Int, arguments: Any?): PlatformView {
+        val parameters = arguments.asMap()
+        val environment = context.messageCenterEnvironment(parameters)
+        val channel = MethodChannel(messenger, "io.engage.flutter/message_center_list/$viewId")
+        val content = EngageMessageCenterListView(
+            environment,
+            sortOrder = parameters.inboxSortOrder(),
+            onEntryTap = { entry -> channel.invokeMethod("entryTap", entry.toFlutter()) },
+            onError = { error -> channel.invokeMethod("error", error.toFlutter()) },
+            startImmediately = false,
+            materialTheme = environment.messageCenterMaterialTheme(parameters),
+            layout = parameters.messageCenterLayout(),
+        )
+        channel.setMethodCallHandler { call, result ->
+            if (call.method == "ready") {
+                content.start()
+                result.success(null)
+            } else {
+                result.notImplemented()
+            }
+        }
+        EngageLogger.debug("Flutter", "Message Center list platform view created viewId=$viewId")
+        return object : PlatformView {
+            override fun getView(): View = content
+            override fun dispose() {
+                channel.setMethodCallHandler(null)
+                content.close()
+                EngageLogger.debug("Flutter", "Message Center list platform view disposed viewId=$viewId")
+            }
+        }
+    }
+}
+
+private class EngageMessageCenterDetailViewFactory(
+    private val messenger: BinaryMessenger,
+) : PlatformViewFactory(StandardMessageCodec.INSTANCE) {
+    override fun create(context: Context, viewId: Int, arguments: Any?): PlatformView {
+        val parameters = arguments.asMap()
+        val entryId = InboxEntryId(parameters.string("entryId"))
+        val environment = context.messageCenterEnvironment(parameters)
+        val channel = MethodChannel(messenger, "io.engage.flutter/message_center_detail/$viewId")
+        val content = EngageMessageCenterDetailView(
+            environment,
+            onUnavailable = { channel.invokeMethod("unavailable", null) },
+            onError = { error -> channel.invokeMethod("error", error.toFlutter()) },
+            materialTheme = environment.messageCenterMaterialTheme(parameters),
+            layout = parameters.messageCenterLayout(),
+        )
+        channel.setMethodCallHandler { call, result ->
+            if (call.method == "ready") {
+                content.display(entryId)
+                result.success(null)
+            } else {
+                result.notImplemented()
+            }
+        }
+        EngageLogger.debug(
+            "Flutter",
+            "Message Center detail platform view created viewId=$viewId entryId=$entryId",
+        )
+        return object : PlatformView {
+            override fun getView(): View = content
+            override fun dispose() {
+                channel.setMethodCallHandler(null)
+                content.close()
+                EngageLogger.debug("Flutter", "Message Center detail platform view disposed viewId=$viewId")
+            }
+        }
+    }
+}
+
+private fun MessageCenterViewError.toFlutter(): FlutterMap = mapOf(
+    "code" to code.name,
+    "message" to message,
+    "isRetryable" to isRetryable,
+)
+
+private fun Context.messageCenterEnvironment(arguments: FlutterMap): Context {
+    val configuration = Configuration(resources.configuration)
+    configuration.uiMode = (configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK.inv()) or
+        if (arguments["appearance"] == "DARK") Configuration.UI_MODE_NIGHT_YES
+        else Configuration.UI_MODE_NIGHT_NO
+    (arguments["locale"] as? String)?.takeIf(String::isNotBlank)?.let { languageTag ->
+        configuration.setLocale(Locale.forLanguageTag(languageTag))
+    }
+    return ContextThemeWrapper(this, theme).apply {
+        applyOverrideConfiguration(configuration)
+    }
+}
+
+private fun Context.messageCenterMaterialTheme(arguments: FlutterMap): MessageCenterMaterialTheme {
+    val defaults = MessageCenterMaterialTheme.defaults(this)
+    val values = arguments["material3"]?.asMap() ?: return defaults
+    fun color(key: String, fallback: Int): Int = (values[key] as? Number)?.toLong()?.toInt() ?: fallback
+    return MessageCenterMaterialTheme(
+        primary = color("primary", defaults.primary),
+        onPrimary = color("onPrimary", defaults.onPrimary),
+        primaryContainer = color("primaryContainer", defaults.primaryContainer),
+        surface = color("surface", defaults.surface),
+        surfaceContainerLow = color("surfaceContainerLow", defaults.surfaceContainerLow),
+        surfaceContainer = color("surfaceContainer", defaults.surfaceContainer),
+        onSurface = color("onSurface", defaults.onSurface),
+        onSurfaceVariant = color("onSurfaceVariant", defaults.onSurfaceVariant),
+        outlineVariant = color("outlineVariant", defaults.outlineVariant),
+        error = color("error", defaults.error),
+        onError = color("onError", defaults.onError),
+    )
+}
+
+private fun Context.preferenceCenterDisplayOptions(arguments: FlutterMap): PreferenceCenterDisplayOptions {
+    val defaults = MessageCenterMaterialTheme.defaults(this)
+    val values = arguments["material3"]?.asMap().orEmpty()
+    fun color(key: String, fallback: Int): Int = (values[key] as? Number)?.toLong()?.toInt() ?: fallback
+    val appearance = when (arguments["appearance"] as? String) {
+        "DARK" -> PreferenceCenterAppearance.DARK
+        else -> PreferenceCenterAppearance.LIGHT
+    }
+    return PreferenceCenterDisplayOptions(
+        key = arguments["key"] as? String,
+        localeLanguageTag = arguments["locale"] as? String,
+        materialTheme = PreferenceCenterMaterialTheme(
+            appearance = appearance,
+            primary = color("primary", defaults.primary),
+            onPrimary = color("onPrimary", defaults.onPrimary),
+            primaryContainer = color("primaryContainer", defaults.primaryContainer),
+            onPrimaryContainer = color("onPrimaryContainer", defaults.primary),
+            surface = color("surface", defaults.surface),
+            surfaceContainerLow = color("surfaceContainerLow", defaults.surfaceContainerLow),
+            surfaceContainer = color("surfaceContainer", defaults.surfaceContainer),
+            onSurface = color("onSurface", defaults.onSurface),
+            onSurfaceVariant = color("onSurfaceVariant", defaults.onSurfaceVariant),
+            outlineVariant = color("outlineVariant", defaults.outlineVariant),
+            error = color("error", defaults.error),
+            onError = color("onError", defaults.onError),
+        ),
+    )
+}
+
+private fun FlutterMap.messageCenterLayout(): MessageCenterViewLayout {
+    val defaults = MessageCenterViewLayout()
+    val values = this["layout"]?.asMap() ?: return defaults
+    fun dimension(key: String, fallback: Float): Float = (values[key] as? Number)?.toFloat() ?: fallback
+    return MessageCenterViewLayout(
+        horizontalPaddingDp = dimension("horizontalPadding", defaults.horizontalPaddingDp),
+        itemSpacingDp = dimension("itemSpacing", defaults.itemSpacingDp),
+        itemCornerRadiusDp = dimension("itemCornerRadius", defaults.itemCornerRadiusDp),
+    )
+}
+
+private fun FlutterMap.inboxSortOrder(): InboxSortOrder = when (this["sortOrder"] as? String) {
+    "OLDEST_FIRST" -> InboxSortOrder.OLDEST_FIRST
+    else -> InboxSortOrder.NEWEST_FIRST
 }
