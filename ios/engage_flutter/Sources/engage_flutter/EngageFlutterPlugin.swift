@@ -218,7 +218,8 @@ public final class EngageFlutterPlugin: NSObject, FlutterPlugin, FlutterStreamHa
         case "messageCenter.pager.create":
           createPager(
             id: try arguments.string("pagerId"),
-            pageSize: (arguments["pageSize"] as? NSNumber)?.intValue ?? 20
+            pageSize: (arguments["pageSize"] as? NSNumber)?.intValue ?? 20,
+            sortOrder: inboxSortOrder(arguments)
           )
           result(nil)
         case "messageCenter.pager.refresh":
@@ -414,13 +415,13 @@ public final class EngageFlutterPlugin: NSObject, FlutterPlugin, FlutterStreamHa
     }
   }
 
-  private func createPager(id: String, pageSize: Int) {
+  private func createPager(id: String, pageSize: Int, sortOrder: InboxSortOrder) {
     guard pagers[id] == nil else {
       EngageLogger.verbose("Flutter", "message center pager reused id=\(id)")
       return
     }
     EngageLogger.debug("Flutter", "message center pager created id=\(id) pageSize=\(pageSize)")
-    let inboxPager = Engage.messageCenter.inbox.pager(pageSize: pageSize)
+    let inboxPager = Engage.messageCenter.inbox.pager(pageSize: pageSize, sortOrder: sortOrder)
     let task = Task { [weak self] in
       for await value in inboxPager.state.updates {
         self?.emit(key: "messageCenter.pager", value: flutterPagerState(value), scope: id)
@@ -677,6 +678,9 @@ private final class EngageMessageCenterListViewFactory: NSObject, FlutterPlatfor
     let readiness = EngagePlatformViewReadiness()
     let content = EngageReadyPlatformContent(readiness: readiness) {
       EngageMessageCenterListView(
+        sortOrder: inboxSortOrder(args),
+        materialTheme: environment.materialTheme,
+        layout: environment.layout,
         onEntryTap: { entry in channel.invokeMethod("entryTap", arguments: flutterInboxEntry(entry)) },
         onError: { error in channel.invokeMethod("error", arguments: flutterMessageCenterError(error)) }
       )
@@ -719,6 +723,7 @@ private final class EngageMessageCenterDetailViewFactory: NSObject, FlutterPlatf
     let content = EngageReadyPlatformContent(readiness: readiness) {
       EngageMessageCenterDetailView(
         entryId: entryId,
+        materialTheme: environment.materialTheme,
         onUnavailable: { channel.invokeMethod("unavailable", arguments: nil) },
         onError: { error in channel.invokeMethod("error", arguments: flutterMessageCenterError(error)) }
       )
@@ -838,13 +843,55 @@ private final class EngageHostingContainerView: UIView {
 private struct MessageCenterEnvironment {
   let colorScheme: ColorScheme
   let locale: Locale
+  let materialTheme: MessageCenterMaterialTheme
+  let layout: MessageCenterViewLayout
+}
+
+private func inboxSortOrder(_ args: Any?) -> InboxSortOrder {
+  let arguments = args as? FlutterMap ?? [:]
+  return arguments["sortOrder"] as? String == "OLDEST_FIRST" ? .oldestFirst : .newestFirst
 }
 
 private func messageCenterEnvironment(_ args: Any?) -> MessageCenterEnvironment {
   let arguments = args as? FlutterMap ?? [:]
+  let material = arguments["material3"] as? FlutterMap ?? [:]
+  let layout = arguments["layout"] as? FlutterMap ?? [:]
+  func color(_ key: String, fallback: Color) -> Color {
+    guard let number = material[key] as? NSNumber else { return fallback }
+    let argb = UInt32(truncating: number)
+    return Color(
+      red: Double((argb >> 16) & 0xFF) / 255,
+      green: Double((argb >> 8) & 0xFF) / 255,
+      blue: Double(argb & 0xFF) / 255,
+      opacity: Double((argb >> 24) & 0xFF) / 255
+    )
+  }
+  func dimension(_ key: String, fallback: CGFloat) -> CGFloat {
+    (layout[key] as? NSNumber).map(CGFloat.init(truncating:)) ?? fallback
+  }
+  let defaultTheme = MessageCenterMaterialTheme.system
+  let defaultLayout = MessageCenterViewLayout.default
   return MessageCenterEnvironment(
     colorScheme: (arguments["appearance"] as? String) == "DARK" ? .dark : .light,
-    locale: Locale(identifier: arguments["locale"] as? String ?? Locale.current.identifier)
+    locale: Locale(identifier: arguments["locale"] as? String ?? Locale.current.identifier),
+    materialTheme: MessageCenterMaterialTheme(
+      primary: color("primary", fallback: defaultTheme.primary),
+      onPrimary: color("onPrimary", fallback: defaultTheme.onPrimary),
+      primaryContainer: color("primaryContainer", fallback: defaultTheme.primaryContainer),
+      surface: color("surface", fallback: defaultTheme.surface),
+      surfaceContainerLow: color("surfaceContainerLow", fallback: defaultTheme.surfaceContainerLow),
+      surfaceContainer: color("surfaceContainer", fallback: defaultTheme.surfaceContainer),
+      onSurface: color("onSurface", fallback: defaultTheme.onSurface),
+      onSurfaceVariant: color("onSurfaceVariant", fallback: defaultTheme.onSurfaceVariant),
+      outlineVariant: color("outlineVariant", fallback: defaultTheme.outlineVariant),
+      error: color("error", fallback: defaultTheme.error),
+      onError: color("onError", fallback: defaultTheme.onError)
+    ),
+    layout: MessageCenterViewLayout(
+      horizontalPadding: dimension("horizontalPadding", fallback: defaultLayout.horizontalPadding),
+      itemSpacing: dimension("itemSpacing", fallback: defaultLayout.itemSpacing),
+      itemCornerRadius: dimension("itemCornerRadius", fallback: defaultLayout.itemCornerRadius)
+    )
   )
 }
 

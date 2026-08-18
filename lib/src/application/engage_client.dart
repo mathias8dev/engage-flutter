@@ -613,7 +613,10 @@ final class InboxApi {
   final Map<String, _InboxPager> _pagers = {};
   int _nextPagerId = 0;
 
-  InboxPager pager({int pageSize = 20}) {
+  InboxPager pager({
+    int pageSize = 20,
+    InboxSortOrder sortOrder = InboxSortOrder.newestFirst,
+  }) {
     if (pageSize < 1 || pageSize > 100) {
       throw ArgumentError.value(
         pageSize,
@@ -622,11 +625,18 @@ final class InboxApi {
       );
     }
     final id = 'flutter-${++_nextPagerId}';
-    EngageLog.info('MessageCenter', 'pager creating id=$id pageSize=$pageSize');
+    EngageLog.info(
+      'MessageCenter',
+      'pager creating id=$id pageSize=$pageSize sortOrder=${sortOrder.name}',
+    );
     final created = _platform
         .invoke('messageCenter.pager.create', {
           'pagerId': id,
           'pageSize': pageSize,
+          'sortOrder': switch (sortOrder) {
+            InboxSortOrder.newestFirst => 'NEWEST_FIRST',
+            InboxSortOrder.oldestFirst => 'OLDEST_FIRST',
+          },
         })
         .then<void>((_) {});
     final pager = _InboxPager(

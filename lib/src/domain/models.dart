@@ -161,6 +161,8 @@ enum SdkFeature {
 
 enum PrivacyState { optedIn, optedOut }
 
+enum InboxSortOrder { newestFirst, oldestFirst }
+
 enum PushSubscriptionState { optedIn, optedOut }
 
 enum PushPermission {

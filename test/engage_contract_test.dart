@@ -169,7 +169,10 @@ void main() {
   test(
     'Inbox entries keep the application payload flat and headless',
     () async {
-      final pager = Engage.messageCenter.inbox.pager(pageSize: 20);
+      final pager = Engage.messageCenter.inbox.pager(
+        pageSize: 20,
+        sortOrder: InboxSortOrder.oldestFirst,
+      );
       final states = <InboxPagerState>[];
       final subscription = pager.state.listen(states.add);
 
@@ -194,6 +197,11 @@ void main() {
       expect(entry.key, 'order.shipped');
       expect(entry.payload, {'order_id': 'order-42', 'carrier': 'DHL'});
       expect(entry.payload, isNot(contains('title')));
+      expect(platform.invocations.first.arguments, {
+        'pagerId': 'flutter-1',
+        'pageSize': 20,
+        'sortOrder': 'OLDEST_FIRST',
+      });
       await pager.close();
       await subscription.cancel();
     },
@@ -210,12 +218,27 @@ void main() {
   });
 
   test('embedded Message Center widgets expose local navigation callbacks', () {
-    final list = EngageMessageCenterList(onEntryTap: (_) {});
-    final detail = EngageMessageCenterDetail(entryId: InboxEntryId('entry-42'));
+    const layout = EngageMessageCenterLayout(
+      horizontalPadding: 20,
+      itemSpacing: 8,
+      itemCornerRadius: 16,
+    );
+    final list = EngageMessageCenterList(
+      onEntryTap: (_) {},
+      layout: layout,
+      sortOrder: InboxSortOrder.oldestFirst,
+    );
+    final detail = EngageMessageCenterDetail(
+      entryId: InboxEntryId('entry-42'),
+      layout: layout,
+    );
 
     expect(list.onEntryTap, isNotNull);
+    expect(list.layout, same(layout));
+    expect(list.sortOrder, InboxSortOrder.oldestFirst);
     expect(list.onError, isNull);
     expect(detail.entryId.value, 'entry-42');
+    expect(detail.layout, same(layout));
     expect(detail.onUnavailable, isNull);
     expect(detail.onError, isNull);
   });

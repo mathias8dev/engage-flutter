@@ -24,15 +24,41 @@ final class MessageCenterViewException implements Exception {
   String toString() => 'MessageCenterViewException(${code.name}): $message';
 }
 
+/// Host-owned layout tokens for the native Message Center shell.
+@immutable
+final class EngageMessageCenterLayout {
+  const EngageMessageCenterLayout({
+    this.horizontalPadding = 16,
+    this.itemSpacing = 12,
+    this.itemCornerRadius = 20,
+  }) : assert(horizontalPadding >= 0),
+       assert(itemSpacing >= 0),
+       assert(itemCornerRadius >= 0);
+
+  final double horizontalPadding;
+  final double itemSpacing;
+  final double itemCornerRadius;
+
+  Map<String, Object> _toPlatform() => {
+    'horizontalPadding': horizontalPadding,
+    'itemSpacing': itemSpacing,
+    'itemCornerRadius': itemCornerRadius,
+  };
+}
+
 /// Engage-rendered Inbox summaries without a route, Scaffold, AppBar, or Navigator.
 final class EngageMessageCenterList extends StatefulWidget {
   const EngageMessageCenterList({
     required this.onEntryTap,
+    this.sortOrder = InboxSortOrder.newestFirst,
+    this.layout = const EngageMessageCenterLayout(),
     this.onError,
     super.key,
   });
 
   final ValueChanged<InboxEntry> onEntryTap;
+  final InboxSortOrder sortOrder;
+  final EngageMessageCenterLayout layout;
   final ValueChanged<MessageCenterViewException>? onError;
 
   @override
@@ -49,7 +75,13 @@ final class _EngageMessageCenterListState
     context: context,
     viewType: 'io.engage.flutter/message_center_list',
     channelPrefix: 'io.engage.flutter/message_center_list',
-    creationParams: _environmentParams(context),
+    creationParams: {
+      ..._environmentParams(context, widget.layout),
+      'sortOrder': switch (widget.sortOrder) {
+        InboxSortOrder.newestFirst => 'NEWEST_FIRST',
+        InboxSortOrder.oldestFirst => 'OLDEST_FIRST',
+      },
+    },
     onPlatformViewCreated: _onPlatformViewCreated,
   );
 
@@ -81,12 +113,14 @@ final class _EngageMessageCenterListState
 final class EngageMessageCenterDetail extends StatefulWidget {
   const EngageMessageCenterDetail({
     required this.entryId,
+    this.layout = const EngageMessageCenterLayout(),
     this.onUnavailable,
     this.onError,
     super.key,
   });
 
   final InboxEntryId entryId;
+  final EngageMessageCenterLayout layout;
   final VoidCallback? onUnavailable;
   final ValueChanged<MessageCenterViewException>? onError;
 
@@ -105,7 +139,7 @@ final class _EngageMessageCenterDetailState
     viewType: 'io.engage.flutter/message_center_detail',
     channelPrefix: 'io.engage.flutter/message_center_detail',
     creationParams: {
-      ..._environmentParams(context),
+      ..._environmentParams(context, widget.layout),
       'entryId': widget.entryId.value,
     },
     onPlatformViewCreated: _onPlatformViewCreated,
@@ -146,11 +180,12 @@ Widget _messageCenterPlatformView({
 }) {
   final identity =
       '${creationParams['appearance']}:${creationParams['locale']}:'
-      '${creationParams['entryId'] ?? ''}';
+      '${creationParams['entryId'] ?? ''}:${creationParams['material3']}:${creationParams['layout']}';
+  final viewIdentity = '$identity:${creationParams['sortOrder'] ?? ''}';
   switch (defaultTargetPlatform) {
     case TargetPlatform.android:
       return AndroidView(
-        key: ValueKey('$channelPrefix:$identity'),
+        key: ValueKey('$channelPrefix:$viewIdentity'),
         viewType: viewType,
         layoutDirection: Directionality.of(context),
         creationParams: creationParams,
@@ -159,7 +194,7 @@ Widget _messageCenterPlatformView({
       );
     case TargetPlatform.iOS:
       return UiKitView(
-        key: ValueKey('$channelPrefix:$identity'),
+        key: ValueKey('$channelPrefix:$viewIdentity'),
         viewType: viewType,
         layoutDirection: Directionality.of(context),
         creationParams: creationParams,
@@ -173,10 +208,31 @@ Widget _messageCenterPlatformView({
   }
 }
 
-Map<String, Object?> _environmentParams(BuildContext context) => {
-  'appearance': Theme.of(context).brightness.name.toUpperCase(),
-  'locale': Localizations.localeOf(context).toLanguageTag(),
-};
+Map<String, Object?> _environmentParams(
+  BuildContext context,
+  EngageMessageCenterLayout layout,
+) {
+  final theme = Theme.of(context);
+  final colors = theme.colorScheme;
+  return {
+    'appearance': theme.brightness.name.toUpperCase(),
+    'locale': Localizations.localeOf(context).toLanguageTag(),
+    'material3': {
+      'primary': colors.primary.toARGB32(),
+      'onPrimary': colors.onPrimary.toARGB32(),
+      'primaryContainer': colors.primaryContainer.toARGB32(),
+      'surface': colors.surface.toARGB32(),
+      'surfaceContainerLow': colors.surfaceContainerLow.toARGB32(),
+      'surfaceContainer': colors.surfaceContainer.toARGB32(),
+      'onSurface': colors.onSurface.toARGB32(),
+      'onSurfaceVariant': colors.onSurfaceVariant.toARGB32(),
+      'outlineVariant': colors.outlineVariant.toARGB32(),
+      'error': colors.error.toARGB32(),
+      'onError': colors.onError.toARGB32(),
+    },
+    'layout': layout._toPlatform(),
+  };
+}
 
 MessageCenterViewException _decodeError(Object? value) {
   final map = messageCenterMap(value);

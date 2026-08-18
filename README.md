@@ -324,7 +324,10 @@ Inbox entries are headless application data. There is no presentation model
 and no intermediate `Message` or `Payload` wrapper:
 
 ```dart
-final pager = Engage.messageCenter.inbox.pager(pageSize: 20);
+final pager = Engage.messageCenter.inbox.pager(
+  pageSize: 20,
+  sortOrder: InboxSortOrder.newestFirst,
+);
 
 final subscription = pager.state.listen((state) {
   for (final entry in state.entries) {
@@ -341,7 +344,8 @@ await subscription.cancel();
 
 Each pager owns an independent window. Its `EngageState` is hot, multicast and
 replays the latest state without starting one fetch per listener. Unread state
-is shared:
+is shared. Sorting is server-side on `sentAt`; changing the order creates an
+independent cursor window instead of reordering a partial local page:
 
 ```dart
 Engage.messageCenter.inbox.unreadCount.listen(updateBadge);
@@ -358,6 +362,7 @@ Navigator.of(context).push(
     builder: (_) => Scaffold(
       appBar: AppBar(title: const Text('Messages')),
       body: EngageMessageCenterList(
+        sortOrder: InboxSortOrder.newestFirst,
         onEntryTap: (entry) {
           Navigator.of(context).push(
             MaterialPageRoute(
@@ -378,7 +383,38 @@ The embedded widgets contain no `Scaffold`, `AppBar`, `Navigator`, Activity, or
 view controller. The list renders published `SUMMARY` snapshots and returns a
 typed `InboxEntry` to the local tap callback. The detail renders the matching
 immutable `DETAIL` snapshot and marks the entry read only after that content is
-visible. Both widgets follow the current Flutter brightness and locale.
+visible. Both widgets follow the current Flutter locale and bridge the ambient
+Material 3 `ColorScheme` roles to their native controls, loading states, empty
+states, and fallback surfaces. Once a published snapshot is available, its
+native wrapper is transparent: DivKit alone owns its background, border,
+corners, clipping, and shadow. Host spacing can use the application's layout
+tokens:
+
+```dart
+EngageMessageCenterList(
+  layout: const EngageMessageCenterLayout(
+    horizontalPadding: 16,
+    itemSpacing: 8,
+    itemCornerRadius: 12,
+  ),
+  onEntryTap: openMessage,
+)
+```
+
+The ready-made list owns the destructive row interaction too. On Android, a
+swipe toward the start edge reveals the delete affordance and opens a native
+Material 3 confirmation dialog. Its surface, text, accent, and destructive
+colors come from the ambient Flutter `ColorScheme` already bridged to the
+native view. On iOS, trailing swipe actions expose delete and read-state
+changes without allowing a full swipe to execute deletion; selecting delete
+opens the native SwiftUI confirmation alert. In both cases, only explicit
+confirmation enters the durable native Inbox mutation queue and removes the
+entry optimistically from active views.
+
+Its native header displays the synchronized message and unread counts above a
+compact All/Unread segmented filter. `markAllRead()` remains available to
+applications using the headless Inbox API, but is not imposed in this compact
+ready-made header.
 
 Flutter applications using the headless API continue to receive only `key` and
 `payload` and may implement their own navigation and rendering.
