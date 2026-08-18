@@ -83,6 +83,20 @@ binding codes, attribute values and payload values are never logged.
 second call with the same configuration is safe; the native SDK rejects a
 different App identity in the same process.
 
+When the same release both upgrades from endpoint-scoped native storage and changes the API
+endpoint, declare the previous endpoint so the native SDKs can move the correct App Key's durable
+state:
+
+```dart
+EngageConfig(
+  appKey: const String.fromEnvironment('ENGAGE_APP_KEY'),
+  endpoint: const String.fromEnvironment('ENGAGE_ENDPOINT'),
+  legacyEndpoints: [const String.fromEnvironment('PREVIOUS_ENGAGE_ENDPOINT')],
+)
+```
+
+This one-time migration option is unnecessary when the endpoint is unchanged.
+
 On Android, the first successful call also persists the validated native
 startup configuration. On later process starts, an Android initialization
 provider restores that configuration and starts the native SDK before a

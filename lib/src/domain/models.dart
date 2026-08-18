@@ -129,12 +129,19 @@ final class EngageConfig {
   const EngageConfig({
     required this.appKey,
     this.endpoint = 'https://api.engage.io/v1/',
+    this.legacyEndpoints = const [],
     this.push = const PushConfig(),
     this.logLevel = EngageLogLevel.info,
   });
 
   final String appKey;
   final String endpoint;
+
+  /// Previous endpoints whose endpoint-scoped native storage belongs to this App Key.
+  ///
+  /// This is only needed when changing the endpoint in the same release that adopts stable
+  /// App-Key-scoped native storage. The current [endpoint] is considered automatically.
+  final List<String> legacyEndpoints;
   final PushConfig push;
   final EngageLogLevel logLevel;
 }

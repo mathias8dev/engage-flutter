@@ -9,7 +9,7 @@ val engageFlutterVersion = File(projectDir, "../pubspec.yaml")
             .trim()
             .substringBefore(' ')
     }
-val engageAndroidSdkDefaultVersion = "2.1.0"
+val engageAndroidSdkDefaultVersion = "2.1.2"
 val engageAndroidSdkVersion = providers.gradleProperty("engageAndroidSdkVersion")
     .orElse(engageAndroidSdkDefaultVersion)
     .get()

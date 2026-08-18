@@ -18,6 +18,7 @@ void main() {
       config: const EngageConfig(
         appKey: 'eng_app_test',
         endpoint: 'https://edge.example.test/v1/',
+        legacyEndpoints: ['https://old-edge.example.test/v1/'],
         logLevel: EngageLogLevel.warning,
       ),
     );
@@ -32,6 +33,10 @@ void main() {
       platform.invocations.single.arguments,
       containsPair('logLevel', 'WARNING'),
     );
+    expect(
+      platform.invocations.single.arguments,
+      containsPair('legacyEndpoints', ['https://old-edge.example.test/v1/']),
+    );
   });
 
   test(
@@ -42,6 +47,22 @@ void main() {
           config: const EngageConfig(
             appKey: 'eng_app_test',
             endpoint: 'not-an-http-endpoint',
+          ),
+        ),
+        throwsArgumentError,
+      );
+      expect(platform.invocations, isEmpty);
+    },
+  );
+
+  test(
+    'start rejects an invalid legacy endpoint before crossing the bridge',
+    () async {
+      expect(
+        () => Engage.start(
+          config: const EngageConfig(
+            appKey: 'eng_app_test',
+            legacyEndpoints: ['not-an-http-endpoint'],
           ),
         ),
         throwsArgumentError,

@@ -6,7 +6,7 @@ import PackageDescription
 
 let manifestDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
 let localEngageConfiguration = manifestDirectory.appendingPathComponent(".engage-local")
-let engageIosSdkVersion: Version = "2.1.0"
+let engageIosSdkVersion: Version = "2.1.1"
 let engageIosDependency: Package.Dependency
 
 if FileManager.default.fileExists(atPath: localEngageConfiguration.path) {

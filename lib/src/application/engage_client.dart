@@ -705,6 +705,18 @@ void _validateConfig(EngageConfig config) {
       'must be an absolute HTTP(S) URL',
     );
   }
+  for (final legacyEndpointValue in config.legacyEndpoints) {
+    final legacyEndpoint = Uri.tryParse(legacyEndpointValue);
+    if (legacyEndpoint == null ||
+        !legacyEndpoint.hasAuthority ||
+        (legacyEndpoint.scheme != 'https' && legacyEndpoint.scheme != 'http')) {
+      throw ArgumentError.value(
+        legacyEndpointValue,
+        'legacyEndpoints',
+        'must contain only absolute HTTP(S) URLs',
+      );
+    }
+  }
   final android = config.push.android;
   if (android != null &&
       !android.channels.any(
@@ -719,6 +731,7 @@ void _validateConfig(EngageConfig config) {
 JsonMap _encodeConfig(EngageConfig config) => {
   'appKey': config.appKey,
   'endpoint': config.endpoint,
+  'legacyEndpoints': config.legacyEndpoints,
   'logLevel': enumWire(config.logLevel),
   'push': {
     'foregroundPresentation': enumWire(config.push.foregroundPresentation),

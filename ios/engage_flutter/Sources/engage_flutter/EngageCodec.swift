@@ -45,9 +45,20 @@ func engageConfig(_ value: FlutterMap) throws -> EngageConfig {
         endpoint.host != nil else {
     throw EngageFlutterCodecError.invalidArgument("Invalid HTTP(S) endpoint: \(endpointValue)")
   }
+  let legacyEndpoints = try value.list("legacyEndpoints").map { raw -> URL in
+    guard let endpointValue = raw as? String,
+          let endpoint = URL(string: endpointValue),
+          let scheme = endpoint.scheme?.lowercased(),
+          ["http", "https"].contains(scheme),
+          endpoint.host != nil else {
+      throw EngageFlutterCodecError.invalidArgument("Invalid legacy HTTP(S) endpoint: \(raw)")
+    }
+    return endpoint
+  }
   return EngageConfig(
     appKey: try value.string("appKey"),
     endpoint: endpoint,
+    legacyEndpoints: legacyEndpoints,
     push: PushConfig(
       foregroundPresentation: foreground,
       notificationCategories: categories
