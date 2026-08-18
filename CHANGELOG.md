@@ -4,7 +4,7 @@
 
 ## 2.2.0
 
-- Pin the native Engage Android and iOS SDK dependencies to `2.2.0`.
+- Pin the native SDK dependencies to Engage Android `2.2.1` and Engage iOS `2.2.0`.
 - Add host-composable, themeable Message Center list and detail widgets while retaining the
   ready-to-use navigation flow.
 - Add an embedded Preference Center widget with resilient refresh, loading, empty, and error
