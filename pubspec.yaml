@@ -1,6 +1,6 @@
 name: engage_flutter
 description: The official Flutter SDK for Engage push notifications, in-app experiences, feature flags, and message center.
-version: 2.1.1
+version: 2.2.0
 homepage: https://github.com/mathias8dev/engage-flutter
 repository: https://github.com/mathias8dev/engage-flutter
 issue_tracker: https://github.com/mathias8dev/engage-flutter/issues

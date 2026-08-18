@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## 2.2.0
+
+- Pin the native SDK dependencies to Engage Android `2.2.1` and Engage iOS `2.2.0`.
+- Add host-composable, themeable Message Center list and detail widgets while retaining the
+  ready-to-use navigation flow.
+- Add an embedded Preference Center widget with resilient refresh, loading, empty, and error
+  states, backed by the native preference APIs.
+- Preserve the native installation identity when migrating a configured Engage endpoint.
+- Support personalized in-app content and server-resolved Message Center detail rendering.
+
 ## 2.1.1
 
 - Decouple the Flutter package version from the independently pinned Engage Android and iOS SDK
