@@ -20,9 +20,9 @@ validate_semver "Flutter release version" "$version"
     exit 1
 }
 
-android_sdk_version="$(sed -nE 's/^val engageAndroidSdkVersion = "([^"]+)"$/\1/p' android/build.gradle.kts)"
+android_sdk_version="$(sed -nE 's/^val engageAndroidSdkDefaultVersion = "([^"]+)"$/\1/p' android/build.gradle.kts)"
 [[ -n "$android_sdk_version" ]] || {
-    echo "android/build.gradle.kts must declare engageAndroidSdkVersion." >&2
+    echo "android/build.gradle.kts must declare engageAndroidSdkDefaultVersion." >&2
     exit 1
 }
 validate_semver "Engage Android SDK version" "$android_sdk_version"

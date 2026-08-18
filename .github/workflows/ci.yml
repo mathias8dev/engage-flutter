@@ -26,6 +26,7 @@ jobs:
         with:
           cache: true
       - run: mise run build:android
+      - run: mise run composition:android
 
   ios:
     runs-on: macos-latest

@@ -28,6 +28,11 @@ run = [
     "cd example/android && ./gradlew :engage_flutter:testDebugUnitTest",
 ]
 
+[tasks."composition:android"]
+description = "Publish the Android monorepo locally and compile the Flutter bridge against its exact artifacts"
+depends = ["bootstrap"]
+run = "./scripts/check-android-composition.sh"
+
 [tasks."package:check"]
 description = "Run all checks and validate the exact pub.dev archive"
 depends = ["check"]

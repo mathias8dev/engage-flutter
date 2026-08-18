@@ -334,6 +334,11 @@ Engage.messageCenter.inbox.unreadCount.listen(updateBadge);
 await Engage.messageCenter.display(); // Optional Engage UI rendered with DivKit.
 ```
 
+The optional UI renders the published `SUMMARY` surface in its native list. Selecting an entry opens
+a native screen with native back navigation and renders the matching immutable `DETAIL` surface.
+Flutter applications using the headless API continue to receive only `key` and `payload` and may
+implement their own navigation and rendering.
+
 ## Feature flags
 
 Flutter platform calls are asynchronous, so flag getters return `Future<T>`.
@@ -377,3 +382,18 @@ placements, unread count and pager states are all replaying multicast
 See [Architecture](doc/architecture.md) for the bridge boundaries and native
 ownership rules, and [Contract coverage](doc/contract-coverage.md) for the
 complete mapping to the mobile API.
+
+## Native Android composition check
+
+`mise run composition:android` verifies the complete published dependency graph: it publishes all
+five modules from the official `engage_android` monorepo to Maven Local under an isolated version,
+then compiles the Flutter Android bridge against those exact POMs and AARs. CI clones the Android
+tag pinned by this package. In a multi-repository checkout, the task uses the neighboring monorepo;
+when that checkout is ahead of the pinned release, opt in explicitly while preparing the next
+release:
+
+```shell
+ENGAGE_ALLOW_ANDROID_VERSION_MISMATCH=true mise run composition:android
+```
+
+This check never publishes a release or creates a tag.
