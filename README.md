@@ -331,13 +331,43 @@ is shared:
 
 ```dart
 Engage.messageCenter.inbox.unreadCount.listen(updateBadge);
-await Engage.messageCenter.display(); // Optional Engage UI rendered with DivKit.
+await Engage.messageCenter.display();
+await Engage.messageCenter.display(entryId: InboxEntryId('entry-id'));
 ```
 
-The optional UI renders the published `SUMMARY` surface in its native list. Selecting an entry opens
-a native screen with native back navigation and renders the matching immutable `DETAIL` surface.
-Flutter applications using the headless API continue to receive only `key` and `payload` and may
-implement their own navigation and rendering.
+`display()` opens the complete native UI. Applications that own their routes and
+app bars can embed only Engage's rendered content instead:
+
+```dart
+Navigator.of(context).push(
+  MaterialPageRoute(
+    builder: (_) => Scaffold(
+      appBar: AppBar(title: const Text('Messages')),
+      body: EngageMessageCenterList(
+        onEntryTap: (entry) {
+          Navigator.of(context).push(
+            MaterialPageRoute(
+              builder: (_) => Scaffold(
+                appBar: AppBar(title: const Text('Message')),
+                body: EngageMessageCenterDetail(entryId: entry.id),
+              ),
+            ),
+          );
+        },
+      ),
+    ),
+  ),
+);
+```
+
+The embedded widgets contain no `Scaffold`, `AppBar`, `Navigator`, Activity, or
+view controller. The list renders published `SUMMARY` snapshots and returns a
+typed `InboxEntry` to the local tap callback. The detail renders the matching
+immutable `DETAIL` snapshot and marks the entry read only after that content is
+visible. Both widgets follow the current Flutter brightness and locale.
+
+Flutter applications using the headless API continue to receive only `key` and
+`payload` and may implement their own navigation and rendering.
 
 ## Feature flags
 

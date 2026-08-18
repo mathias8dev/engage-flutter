@@ -178,6 +178,27 @@ void main() {
     },
   );
 
+  test('Message Center display optionally targets a concrete entry', () async {
+    await Engage.messageCenter.display();
+    await Engage.messageCenter.display(entryId: InboxEntryId('entry-42'));
+
+    expect(platform.invocations[0].method, 'messageCenter.display');
+    expect(platform.invocations[0].arguments, isEmpty);
+    expect(platform.invocations[1].method, 'messageCenter.display');
+    expect(platform.invocations[1].arguments, {'entryId': 'entry-42'});
+  });
+
+  test('embedded Message Center widgets expose local navigation callbacks', () {
+    final list = EngageMessageCenterList(onEntryTap: (_) {});
+    final detail = EngageMessageCenterDetail(entryId: InboxEntryId('entry-42'));
+
+    expect(list.onEntryTap, isNotNull);
+    expect(list.onError, isNull);
+    expect(detail.entryId.value, 'entry-42');
+    expect(detail.onUnavailable, isNull);
+    expect(detail.onError, isNull);
+  });
+
   test(
     'Inbox pagers have independent windows and shared unread state',
     () async {

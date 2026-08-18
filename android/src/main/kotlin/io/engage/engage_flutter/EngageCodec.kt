@@ -235,7 +235,7 @@ internal fun InboxPagerState.toFlutter(): FlutterMap = mapOf(
     "error" to error?.toFlutter(),
 )
 
-private fun InboxEntry.toFlutter(): FlutterMap = mapOf(
+internal fun InboxEntry.toFlutter(): FlutterMap = mapOf(
     "id" to id.value,
     "key" to key,
     "payload" to payload.toFlutter(),

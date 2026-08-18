@@ -2,18 +2,23 @@ package io.engage.engage_flutter
 
 import android.content.Context
 import android.content.Intent
+import android.content.res.Configuration
 import android.view.View
 import io.engage.sdk.*
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.embedding.engine.plugins.activity.ActivityAware
 import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding
 import io.flutter.plugin.common.EventChannel
+import io.flutter.plugin.common.BinaryMessenger
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import io.flutter.plugin.common.PluginRegistry.NewIntentListener
 import io.flutter.plugin.platform.PlatformView
 import io.flutter.plugin.platform.PlatformViewFactory
 import io.flutter.plugin.common.StandardMessageCodec
+import io.engage.sdk.messagecenter.divkit.MessageCenterViewError
+import io.engage.sdk.messagecenter.divkit.render.EngageMessageCenterDetailView
+import io.engage.sdk.messagecenter.divkit.render.EngageMessageCenterListView
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
@@ -27,6 +32,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import java.util.concurrent.ConcurrentHashMap
+import java.util.Locale
 import kotlin.coroutines.resume
 
 public class EngageFlutterPlugin :
@@ -68,6 +74,14 @@ public class EngageFlutterPlugin :
         binding.platformViewRegistry.registerViewFactory(
             IN_APP_VIEW,
             EngageInAppViewFactory(),
+        )
+        binding.platformViewRegistry.registerViewFactory(
+            MESSAGE_CENTER_LIST_VIEW,
+            EngageMessageCenterListViewFactory(binding.binaryMessenger),
+        )
+        binding.platformViewRegistry.registerViewFactory(
+            MESSAGE_CENTER_DETAIL_VIEW,
+            EngageMessageCenterDetailViewFactory(binding.binaryMessenger),
         )
         EngageLogger.info("Flutter", "Android plugin attached channelsReady=true")
     }
@@ -136,7 +150,9 @@ public class EngageFlutterPlugin :
                 "inApp.overlays.pause" -> Engage.inApp.overlays.pause()
                 "inApp.overlays.resume" -> Engage.inApp.overlays.resume()
                 "inApp.observePlacement" -> observePlacement(arguments.string("key"))
-                "messageCenter.display" -> Engage.messageCenter.display()
+                "messageCenter.display" -> (arguments["entryId"] as? String)
+                    ?.let { Engage.messageCenter.display(InboxEntryId(it)) }
+                    ?: Engage.messageCenter.display()
                 "messageCenter.pager.create" -> createPager(
                     arguments.string("pagerId"),
                     (arguments["pageSize"] as Number).toInt(),
@@ -468,6 +484,8 @@ public class EngageFlutterPlugin :
         const val METHODS_CHANNEL = "io.engage.flutter/methods"
         const val EVENTS_CHANNEL = "io.engage.flutter/events"
         const val IN_APP_VIEW = "io.engage.flutter/in_app_placement"
+        const val MESSAGE_CENTER_LIST_VIEW = "io.engage.flutter/message_center_list"
+        const val MESSAGE_CENTER_DETAIL_VIEW = "io.engage.flutter/message_center_detail"
     }
 }
 
@@ -539,4 +557,87 @@ private class EngageInAppViewFactory : PlatformViewFactory(StandardMessageCodec.
             }
         }
     }
+}
+
+private class EngageMessageCenterListViewFactory(
+    private val messenger: BinaryMessenger,
+) : PlatformViewFactory(StandardMessageCodec.INSTANCE) {
+    override fun create(context: Context, viewId: Int, arguments: Any?): PlatformView {
+        val channel = MethodChannel(messenger, "io.engage.flutter/message_center_list/$viewId")
+        val content = EngageMessageCenterListView(
+            context.messageCenterEnvironment(arguments.asMap()),
+            onEntryTap = { entry -> channel.invokeMethod("entryTap", entry.toFlutter()) },
+            onError = { error -> channel.invokeMethod("error", error.toFlutter()) },
+            startImmediately = false,
+        )
+        channel.setMethodCallHandler { call, result ->
+            if (call.method == "ready") {
+                content.start()
+                result.success(null)
+            } else {
+                result.notImplemented()
+            }
+        }
+        EngageLogger.debug("Flutter", "Message Center list platform view created viewId=$viewId")
+        return object : PlatformView {
+            override fun getView(): View = content
+            override fun dispose() {
+                channel.setMethodCallHandler(null)
+                content.close()
+                EngageLogger.debug("Flutter", "Message Center list platform view disposed viewId=$viewId")
+            }
+        }
+    }
+}
+
+private class EngageMessageCenterDetailViewFactory(
+    private val messenger: BinaryMessenger,
+) : PlatformViewFactory(StandardMessageCodec.INSTANCE) {
+    override fun create(context: Context, viewId: Int, arguments: Any?): PlatformView {
+        val parameters = arguments.asMap()
+        val entryId = InboxEntryId(parameters.string("entryId"))
+        val channel = MethodChannel(messenger, "io.engage.flutter/message_center_detail/$viewId")
+        val content = EngageMessageCenterDetailView(
+            context.messageCenterEnvironment(parameters),
+            onUnavailable = { channel.invokeMethod("unavailable", null) },
+            onError = { error -> channel.invokeMethod("error", error.toFlutter()) },
+        )
+        channel.setMethodCallHandler { call, result ->
+            if (call.method == "ready") {
+                content.display(entryId)
+                result.success(null)
+            } else {
+                result.notImplemented()
+            }
+        }
+        EngageLogger.debug(
+            "Flutter",
+            "Message Center detail platform view created viewId=$viewId entryId=$entryId",
+        )
+        return object : PlatformView {
+            override fun getView(): View = content
+            override fun dispose() {
+                channel.setMethodCallHandler(null)
+                content.close()
+                EngageLogger.debug("Flutter", "Message Center detail platform view disposed viewId=$viewId")
+            }
+        }
+    }
+}
+
+private fun MessageCenterViewError.toFlutter(): FlutterMap = mapOf(
+    "code" to code.name,
+    "message" to message,
+    "isRetryable" to isRetryable,
+)
+
+private fun Context.messageCenterEnvironment(arguments: FlutterMap): Context {
+    val configuration = Configuration(resources.configuration)
+    configuration.uiMode = (configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK.inv()) or
+        if (arguments["appearance"] == "DARK") Configuration.UI_MODE_NIGHT_YES
+        else Configuration.UI_MODE_NIGHT_NO
+    (arguments["locale"] as? String)?.takeIf(String::isNotBlank)?.let { languageTag ->
+        configuration.setLocale(Locale.forLanguageTag(languageTag))
+    }
+    return createConfigurationContext(configuration)
 }

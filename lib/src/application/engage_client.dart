@@ -4,6 +4,7 @@ import '../domain/editors.dart';
 import '../domain/engage_platform.dart';
 import '../domain/engage_logging.dart';
 import '../domain/models.dart';
+import '../infrastructure/message_center_codec.dart';
 
 typedef ActionHandler = FutureOr<ActionResult> Function(EngageAction action);
 typedef InAppOverlayDisplayDelegate =
@@ -675,9 +676,14 @@ final class MessageCenterApi {
   final EngagePlatform _platform;
   final InboxApi inbox;
 
-  Future<void> display() {
-    EngageLog.info('MessageCenter', 'display requested');
-    return _platform.invoke('messageCenter.display');
+  Future<void> display({InboxEntryId? entryId}) {
+    EngageLog.info(
+      'MessageCenter',
+      'display requested entryId=${entryId?.value ?? 'list'}',
+    );
+    return _platform.invoke('messageCenter.display', {
+      if (entryId != null) 'entryId': entryId.value,
+    });
   }
 }
 
@@ -927,20 +933,11 @@ SubscriptionPreference _subscriptionPreference(JsonMap value) =>
 InboxPagerState _inboxPagerState(JsonMap value) => InboxPagerState(
   entries: _list(
     value['entries'],
-  ).map((entry) => _inboxEntry(_map(entry))).toList(growable: false),
+  ).map(decodeInboxEntry).toList(growable: false),
   isRefreshing: value['isRefreshing'] as bool? ?? false,
   isLoadingMore: value['isLoadingMore'] as bool? ?? false,
   hasMore: value['hasMore'] as bool? ?? false,
   error: value['error'] == null ? null : _inboxError(_map(value['error'])),
-);
-
-InboxEntry _inboxEntry(JsonMap value) => InboxEntry(
-  id: InboxEntryId(value['id']! as String),
-  key: value['key']! as String,
-  payload: _map(value['payload']),
-  sentAt: DateTime.parse(value['sentAt']! as String),
-  expiresAt: (value['expiresAt'] as String?)?.let(DateTime.parse),
-  readAt: (value['readAt'] as String?)?.let(DateTime.parse),
 );
 
 InboxError _inboxError(JsonMap value) => InboxError(

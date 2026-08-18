@@ -238,16 +238,7 @@ func flutterPreferenceCenter(_ center: PreferenceCenterSnapshot) -> FlutterMap {
 
 func flutterPagerState(_ state: InboxPagerState) -> FlutterMap {
   [
-    "entries": state.entries.map { entry in
-      [
-        "id": entry.id.value,
-        "key": entry.key,
-        "payload": entry.payload.mapValues(flutterValue),
-        "sentAt": iso8601(entry.sentAt),
-        "expiresAt": flutterOptional(entry.expiresAt.map(iso8601)),
-        "readAt": flutterOptional(entry.readAt.map(iso8601)),
-      ] as FlutterMap
-    },
+    "entries": state.entries.map(flutterInboxEntry),
     "isRefreshing": state.isRefreshing,
     "isLoadingMore": state.isLoadingMore,
     "hasMore": state.hasMore,
@@ -258,6 +249,17 @@ func flutterPagerState(_ state: InboxPagerState) -> FlutterMap {
         "isRetryable": error.isRetryable,
       ] as FlutterMap
     }),
+  ]
+}
+
+func flutterInboxEntry(_ entry: InboxEntry) -> FlutterMap {
+  [
+    "id": entry.id.value,
+    "key": entry.key,
+    "payload": entry.payload.mapValues(flutterValue),
+    "sentAt": iso8601(entry.sentAt),
+    "expiresAt": flutterOptional(entry.expiresAt.map(iso8601)),
+    "readAt": flutterOptional(entry.readAt.map(iso8601)),
   ]
 }
 

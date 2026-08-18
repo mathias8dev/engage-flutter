@@ -1,5 +1,6 @@
 import Flutter
 import UIKit
+import SwiftUI
 import EngageSDK
 
 public final class EngageFlutterPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
@@ -48,6 +49,14 @@ public final class EngageFlutterPlugin: NSObject, FlutterPlugin, FlutterStreamHa
     registrar.register(
       EngageInAppViewFactory(),
       withId: "io.engage.flutter/in_app_placement"
+    )
+    registrar.register(
+      EngageMessageCenterListViewFactory(messenger: registrar.messenger()),
+      withId: "io.engage.flutter/message_center_list"
+    )
+    registrar.register(
+      EngageMessageCenterDetailViewFactory(messenger: registrar.messenger()),
+      withId: "io.engage.flutter/message_center_detail"
     )
     EngageLogger.info("Flutter", "iOS plugin registered channelsReady=true")
   }
@@ -202,7 +211,9 @@ public final class EngageFlutterPlugin: NSObject, FlutterPlugin, FlutterStreamHa
           observePlacement(try arguments.string("key"))
           result(nil)
         case "messageCenter.display":
-          Engage.messageCenter.display()
+          Engage.messageCenter.display(
+            entryId: (arguments["entryId"] as? String).map(InboxEntryId.init)
+          )
           result(nil)
         case "messageCenter.pager.create":
           createPager(
@@ -644,4 +655,203 @@ private final class EngageInAppPlatformView: NSObject, FlutterPlatformView {
   }
 
   func view() -> UIView { content }
+}
+
+private final class EngageMessageCenterListViewFactory: NSObject, FlutterPlatformViewFactory {
+  private let messenger: FlutterBinaryMessenger
+
+  init(messenger: FlutterBinaryMessenger) {
+    self.messenger = messenger
+  }
+
+  func create(
+    withFrame frame: CGRect,
+    viewIdentifier viewId: Int64,
+    arguments args: Any?
+  ) -> FlutterPlatformView {
+    let channel = FlutterMethodChannel(
+      name: "io.engage.flutter/message_center_list/\(viewId)",
+      binaryMessenger: messenger
+    )
+    let environment = messageCenterEnvironment(args)
+    let readiness = EngagePlatformViewReadiness()
+    let content = EngageReadyPlatformContent(readiness: readiness) {
+      EngageMessageCenterListView(
+        onEntryTap: { entry in channel.invokeMethod("entryTap", arguments: flutterInboxEntry(entry)) },
+        onError: { error in channel.invokeMethod("error", arguments: flutterMessageCenterError(error)) }
+      )
+      .environment(\.colorScheme, environment.colorScheme)
+      .environment(\.locale, environment.locale)
+    }
+    return EngageHostingPlatformView(
+      frame: frame,
+      content: content,
+      channel: channel,
+      onReady: { readiness.isReady = true }
+    )
+  }
+
+  func createArgsCodec() -> FlutterMessageCodec & NSObjectProtocol {
+    FlutterStandardMessageCodec.sharedInstance()
+  }
+}
+
+private final class EngageMessageCenterDetailViewFactory: NSObject, FlutterPlatformViewFactory {
+  private let messenger: FlutterBinaryMessenger
+
+  init(messenger: FlutterBinaryMessenger) {
+    self.messenger = messenger
+  }
+
+  func create(
+    withFrame frame: CGRect,
+    viewIdentifier viewId: Int64,
+    arguments args: Any?
+  ) -> FlutterPlatformView {
+    let arguments = args as? FlutterMap ?? [:]
+    let entryId = InboxEntryId(arguments["entryId"] as? String ?? "")
+    let channel = FlutterMethodChannel(
+      name: "io.engage.flutter/message_center_detail/\(viewId)",
+      binaryMessenger: messenger
+    )
+    let environment = messageCenterEnvironment(args)
+    let readiness = EngagePlatformViewReadiness()
+    let content = EngageReadyPlatformContent(readiness: readiness) {
+      EngageMessageCenterDetailView(
+        entryId: entryId,
+        onUnavailable: { channel.invokeMethod("unavailable", arguments: nil) },
+        onError: { error in channel.invokeMethod("error", arguments: flutterMessageCenterError(error)) }
+      )
+      .environment(\.colorScheme, environment.colorScheme)
+      .environment(\.locale, environment.locale)
+    }
+    return EngageHostingPlatformView(
+      frame: frame,
+      content: content,
+      channel: channel,
+      onReady: { readiness.isReady = true }
+    )
+  }
+
+  func createArgsCodec() -> FlutterMessageCodec & NSObjectProtocol {
+    FlutterStandardMessageCodec.sharedInstance()
+  }
+}
+
+private final class EngageHostingPlatformView<Content: View>: NSObject, FlutterPlatformView {
+  private let container: EngageHostingContainerView
+  private let channel: FlutterMethodChannel
+
+  init(
+    frame: CGRect,
+    content: Content,
+    channel: FlutterMethodChannel,
+    onReady: @escaping () -> Void
+  ) {
+    container = EngageHostingContainerView(frame: frame, content: content)
+    self.channel = channel
+    super.init()
+    channel.setMethodCallHandler { call, result in
+      if call.method == "ready" {
+        onReady()
+        result(nil)
+      }
+      else { result(FlutterMethodNotImplemented) }
+    }
+  }
+
+  func view() -> UIView { container }
+
+  deinit { channel.setMethodCallHandler(nil) }
+}
+
+private final class EngagePlatformViewReadiness: ObservableObject {
+  @Published var isReady = false
+}
+
+private struct EngageReadyPlatformContent<Content: View>: View {
+  @ObservedObject var readiness: EngagePlatformViewReadiness
+  let content: () -> Content
+
+  init(readiness: EngagePlatformViewReadiness, @ViewBuilder content: @escaping () -> Content) {
+    self.readiness = readiness
+    self.content = content
+  }
+
+  @ViewBuilder var body: some View {
+    if readiness.isReady { content() }
+  }
+}
+
+private final class EngageHostingContainerView: UIView {
+  private let controller: UIViewController
+  private weak var attachedParent: UIViewController?
+
+  init<Content: View>(frame: CGRect, content: Content) {
+    controller = UIHostingController(rootView: content)
+    super.init(frame: frame)
+    controller.view.backgroundColor = .clear
+    controller.view.translatesAutoresizingMaskIntoConstraints = false
+    addSubview(controller.view)
+    NSLayoutConstraint.activate([
+      controller.view.leadingAnchor.constraint(equalTo: leadingAnchor),
+      controller.view.trailingAnchor.constraint(equalTo: trailingAnchor),
+      controller.view.topAnchor.constraint(equalTo: topAnchor),
+      controller.view.bottomAnchor.constraint(equalTo: bottomAnchor),
+    ])
+  }
+
+  @available(*, unavailable)
+  required init?(coder: NSCoder) { nil }
+
+  override func didMoveToWindow() {
+    super.didMoveToWindow()
+    if window == nil {
+      detachController()
+    } else {
+      attachControllerIfNeeded()
+    }
+  }
+
+  private func attachControllerIfNeeded() {
+    guard attachedParent == nil else { return }
+    var responder: UIResponder? = self
+    while let current = responder {
+      if let parent = current as? UIViewController {
+        parent.addChild(controller)
+        controller.didMove(toParent: parent)
+        attachedParent = parent
+        return
+      }
+      responder = current.next
+    }
+  }
+
+  private func detachController() {
+    guard attachedParent != nil else { return }
+    controller.willMove(toParent: nil)
+    controller.removeFromParent()
+    attachedParent = nil
+  }
+}
+
+private struct MessageCenterEnvironment {
+  let colorScheme: ColorScheme
+  let locale: Locale
+}
+
+private func messageCenterEnvironment(_ args: Any?) -> MessageCenterEnvironment {
+  let arguments = args as? FlutterMap ?? [:]
+  return MessageCenterEnvironment(
+    colorScheme: (arguments["appearance"] as? String) == "DARK" ? .dark : .light,
+    locale: Locale(identifier: arguments["locale"] as? String ?? Locale.current.identifier)
+  )
+}
+
+private func flutterMessageCenterError(_ error: MessageCenterViewError) -> FlutterMap {
+  [
+    "code": error.code == .inbox ? "INBOX" : "RENDERING",
+    "message": error.message,
+    "isRetryable": error.isRetryable,
+  ]
 }
