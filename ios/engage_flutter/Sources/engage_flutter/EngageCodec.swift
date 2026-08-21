@@ -201,6 +201,16 @@ func flutterInAppContent(_ content: InAppContent) -> FlutterMap {
     "type": content.type.rawValue,
     "payload": content.payload.mapValues(flutterValue),
     "presentation": flutterPresentation(content.presentation),
+    "automation": content.automation.map { context in
+      [
+        "automationId": context.automationId,
+        "automationVersion": context.automationVersion,
+        "runId": context.runId,
+        "nodeId": context.nodeId,
+        "experienceVersion": context.experienceVersion,
+        "outcomeKeys": context.outcomeKeys.sorted(),
+      ] as FlutterMap
+    } ?? NSNull(),
   ]
 }
 

@@ -187,6 +187,16 @@ internal fun InAppContent.toFlutter(): FlutterMap = mapOf(
     "type" to type.name,
     "payload" to payload.toFlutter(),
     "presentation" to presentation.toFlutter(),
+    "automation" to automation?.let { context ->
+        mapOf(
+            "automationId" to context.automationId,
+            "automationVersion" to context.automationVersion,
+            "runId" to context.runId,
+            "nodeId" to context.nodeId,
+            "experienceVersion" to context.experienceVersion,
+            "outcomeKeys" to context.outcomeKeys.toList().sorted(),
+        )
+    },
 )
 
 private fun PresentationSpec.toFlutter(): FlutterMap = when (this) {

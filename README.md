@@ -282,6 +282,22 @@ For a custom renderer, observe the headless content instead:
 Engage.inApp.placement('home.hero').listen(renderCustomExperience);
 ```
 
+An In-App Experience used by an Automation exposes its immutable routing context through
+`content.automation`. DivKit actions can emit a declared outcome directly. A Flutter-owned UI can
+report the same outcome explicitly:
+
+```dart
+final accepted = await Engage.inApp.trackOutcome(
+  content,
+  'survey_submitted',
+  properties: {'score': 9, 'comment': 'Clear and useful'},
+);
+```
+
+Only keys listed in `content.automation?.outcomeKeys` are accepted. The native SDK persists the
+interaction before delivery; the backend validates its typed properties contract and advances the
+waiting graph exactly once.
+
 ## Actions
 
 ```dart

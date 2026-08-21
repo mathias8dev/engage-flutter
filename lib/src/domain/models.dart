@@ -296,6 +296,7 @@ final class InAppContent {
     required this.payload,
     required this.presentation,
     this.variantId,
+    this.automation,
   });
 
   final String experienceId;
@@ -304,6 +305,25 @@ final class InAppContent {
   final InAppContentType type;
   final JsonMap payload;
   final PresentationSpec presentation;
+  final InAppAutomationContext? automation;
+}
+
+final class InAppAutomationContext {
+  const InAppAutomationContext({
+    required this.automationId,
+    required this.automationVersion,
+    required this.runId,
+    required this.nodeId,
+    required this.experienceVersion,
+    required this.outcomeKeys,
+  });
+
+  final String automationId;
+  final int automationVersion;
+  final String runId;
+  final String nodeId;
+  final int experienceVersion;
+  final Set<String> outcomeKeys;
 }
 
 enum DisplayDecision { allow, defer, discard }

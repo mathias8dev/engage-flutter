@@ -132,7 +132,7 @@ public final class EngageFlutterPlugin: NSObject, FlutterPlugin, FlutterStreamHa
           try await Engage.events.track(try arguments.string("name")) { $0 = decodedEditor }
           result(nil)
         case "events.trackScreen":
-          try await Engage.events.trackScreen(try arguments.string("screenKey"))
+          try await Engage.events.trackScreen(try arguments.string("screen_key"))
           result(nil)
         case "events.clearScreen":
           try await Engage.events.clearScreen()
@@ -216,6 +216,16 @@ public final class EngageFlutterPlugin: NSObject, FlutterPlugin, FlutterStreamHa
         case "inApp.observePlacement":
           observePlacement(try arguments.string("key"))
           result(nil)
+        case "inApp.trackOutcome":
+          let properties = try jsonValue(arguments["properties"])
+          guard let object = properties.objectValue else {
+            throw EngageFlutterCodecError.invalidArgument("Outcome properties must be a map")
+          }
+          result(await Engage.inApp.recordOutcome(
+            messageId: try arguments.string("messageId"),
+            key: try arguments.string("key"),
+            properties: object
+          ))
         case "messageCenter.display":
           Engage.messageCenter.display(
             entryId: (arguments["entryId"] as? String).map(InboxEntryId.init)
