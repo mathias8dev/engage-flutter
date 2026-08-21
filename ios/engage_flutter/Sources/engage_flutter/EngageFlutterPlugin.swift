@@ -132,7 +132,7 @@ public final class EngageFlutterPlugin: NSObject, FlutterPlugin, FlutterStreamHa
           try await Engage.events.track(try arguments.string("name")) { $0 = decodedEditor }
           result(nil)
         case "events.trackScreen":
-          try await Engage.events.trackScreen(try arguments.string("screenKey"))
+          try await Engage.events.trackScreen(try arguments.string("screen_key"))
           result(nil)
         case "events.clearScreen":
           try await Engage.events.clearScreen()

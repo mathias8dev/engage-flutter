@@ -242,7 +242,7 @@ final class EventsApi {
   Future<void> trackScreen(String screenKey) async {
     validateProductKey(screenKey, label: 'screen key');
     EngageLog.info('Events', 'screen requested key=$screenKey');
-    await _platform.invoke('events.trackScreen', {'screenKey': screenKey});
+    await _platform.invoke('events.trackScreen', {'screen_key': screenKey});
   }
 
   Future<void> clearScreen() => _platform.invoke('events.clearScreen');

@@ -112,7 +112,7 @@ public class EngageFlutterPlugin :
                 "events.track" -> Engage.events.track(arguments.string("name")) {
                     applyEvent(arguments)
                 }
-                "events.trackScreen" -> Engage.events.trackScreen(arguments.string("screenKey"))
+                "events.trackScreen" -> Engage.events.trackScreen(arguments.string("screen_key"))
                 "events.clearScreen" -> Engage.events.clearScreen()
                 "events.flush" -> Engage.events.flush()
                 "actions.register" -> registerAction(arguments.string("name"))

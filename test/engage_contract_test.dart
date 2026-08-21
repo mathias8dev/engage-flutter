@@ -136,6 +136,18 @@ void main() {
     expect(platform.invocations.single.arguments, isNull);
   });
 
+  test(
+    'screen tracking crosses the native bridge with snake case fields',
+    () async {
+      await Engage.events.trackScreen('checkout.payment');
+
+      expect(platform.invocations.single.method, 'events.trackScreen');
+      expect(platform.invocations.single.arguments, {
+        'screen_key': 'checkout.payment',
+      });
+    },
+  );
+
   test('native actions execute the registered Dart handler', () async {
     final registration = Engage.actions.register('open_order', (action) {
       expect(action.arguments.requireString('order_id'), 'order-42');
