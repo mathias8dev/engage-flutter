@@ -226,6 +226,7 @@ func flutterPreferenceCenter(_ center: PreferenceCenterSnapshot) -> FlutterMap {
     "key": center.key,
     "displayName": center.displayName,
     "description": flutterOptional(center.description),
+    "projectStyle": flutterOptional(center.projectStyle.map(flutterPreferenceCenterStyle)),
     "sections": center.sections.map { section in
       [
         "key": section.key,
@@ -245,6 +246,42 @@ func flutterPreferenceCenter(_ center: PreferenceCenterSnapshot) -> FlutterMap {
       ] as FlutterMap
     },
   ]
+}
+
+private func flutterPreferenceCenterStyle(_ style: PreferenceCenterProjectStyle) -> FlutterMap {
+  [
+    "policy": style.policy.rawValue,
+    "fallbackModeKey": style.fallbackModeKey,
+    "fixedModeKey": flutterOptional(style.fixedModeKey),
+    "lightModeKey": flutterOptional(style.lightModeKey),
+    "darkModeKey": flutterOptional(style.darkModeKey),
+    "designTokenVersion": style.designTokenVersion,
+    "modes": style.modes.mapValues { colors in
+      [
+        "primary": flutterOptional(flutterColor(colors.primary)),
+        "onPrimary": flutterOptional(flutterColor(colors.onPrimary)),
+        "primaryContainer": flutterOptional(flutterColor(colors.primaryContainer)),
+        "onPrimaryContainer": flutterOptional(flutterColor(colors.onPrimaryContainer)),
+        "surface": flutterOptional(flutterColor(colors.surface)),
+        "surfaceContainerLow": flutterOptional(flutterColor(colors.surfaceContainerLow)),
+        "surfaceContainer": flutterOptional(flutterColor(colors.surfaceContainer)),
+        "onSurface": flutterOptional(flutterColor(colors.onSurface)),
+        "onSurfaceVariant": flutterOptional(flutterColor(colors.onSurfaceVariant)),
+        "outlineVariant": flutterOptional(flutterColor(colors.outlineVariant)),
+        "error": flutterOptional(flutterColor(colors.error)),
+        "onError": flutterOptional(flutterColor(colors.onError)),
+      ] as FlutterMap
+    },
+  ]
+}
+
+private func flutterColor(_ rawValue: String?) -> Int64? {
+  guard var value = rawValue?.trimmingCharacters(in: .whitespacesAndNewlines),
+        value.first == "#" else { return nil }
+  value.removeFirst()
+  guard value.count == 6 || value.count == 8,
+        let parsed = UInt64(value, radix: 16) else { return nil }
+  return Int64(value.count == 6 ? parsed | 0xff00_0000 : parsed)
 }
 
 func flutterPagerState(_ state: InboxPagerState) -> FlutterMap {

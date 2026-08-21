@@ -87,7 +87,14 @@ final class _EngagePreferenceCenterState extends State<EngagePreferenceCenter> {
         onError: widget.onError,
       ),
     };
-    return RefreshIndicator(onRefresh: _refresh, child: content);
+    final hostTheme = Theme.of(context);
+    final projectTheme = center?.projectStyle == null
+        ? null
+        : _projectTheme(context, hostTheme, center!.projectStyle!);
+    return Theme(
+      data: projectTheme ?? hostTheme,
+      child: RefreshIndicator(onRefresh: _refresh, child: content),
+    );
   }
 }
 
@@ -476,3 +483,48 @@ String _localizedChannel(EngageLocalizations strings, Channel channel) =>
       Channel.push => strings.channelPush,
       Channel.whatsapp => strings.channelWhatsapp,
     };
+
+ThemeData? _projectTheme(
+  BuildContext context,
+  ThemeData host,
+  PreferenceCenterProjectStyle style,
+) {
+  final brightness = MediaQuery.platformBrightnessOf(context);
+  final requestedMode = switch (style.policy) {
+    PreferenceCenterStylePolicy.fixed => style.fixedModeKey,
+    PreferenceCenterStylePolicy.system =>
+      brightness == Brightness.dark ? style.darkModeKey : style.lightModeKey,
+  };
+  final modeKey =
+      requestedMode != null && style.modes.containsKey(requestedMode)
+      ? requestedMode
+      : style.modes.containsKey(style.fallbackModeKey)
+      ? style.fallbackModeKey
+      : style.modes.keys.firstOrNull;
+  final project = modeKey == null ? null : style.modes[modeKey];
+  if (project == null) return null;
+  final resolvedBrightness = modeKey == style.darkModeKey
+      ? Brightness.dark
+      : modeKey == style.lightModeKey
+      ? Brightness.light
+      : brightness;
+  Color? color(int? value) => value == null ? null : Color(value);
+  return host.copyWith(
+    brightness: resolvedBrightness,
+    colorScheme: host.colorScheme.copyWith(
+      brightness: resolvedBrightness,
+      primary: color(project.primary),
+      onPrimary: color(project.onPrimary),
+      primaryContainer: color(project.primaryContainer),
+      onPrimaryContainer: color(project.onPrimaryContainer),
+      surface: color(project.surface),
+      surfaceContainerLow: color(project.surfaceContainerLow),
+      surfaceContainer: color(project.surfaceContainer),
+      onSurface: color(project.onSurface),
+      onSurfaceVariant: color(project.onSurfaceVariant),
+      outlineVariant: color(project.outlineVariant),
+      error: color(project.error),
+      onError: color(project.onError),
+    ),
+  );
+}

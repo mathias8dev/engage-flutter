@@ -502,6 +502,55 @@ void main() {
   );
 
   testWidgets(
+    'embedded preference center applies its published project style',
+    (tester) async {
+      const projectPrimary = Color(0xFF006A60);
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: ThemeData(
+            colorScheme: ColorScheme.fromSeed(
+              seedColor: const Color(0xFF6750A4),
+            ),
+            useMaterial3: true,
+          ),
+          home: const Scaffold(body: EngagePreferenceCenter()),
+        ),
+      );
+      await tester.pump();
+      platform.emit('preferenceCenter.center', {
+        ..._preferenceCenterPayload(),
+        'projectStyle': {
+          'policy': 'FIXED',
+          'fallbackModeKey': 'light',
+          'fixedModeKey': 'light',
+          'lightModeKey': 'light',
+          'darkModeKey': 'dark',
+          'designTokenVersion': 7,
+          'modes': {
+            'light': {
+              'primary': projectPrimary.toARGB32(),
+              'surfaceContainerLow': const Color(0xFFF0F4F2).toARGB32(),
+            },
+          },
+        },
+      }, scope: '');
+      await tester.pump();
+
+      final projectTheme = tester
+          .widgetList<Theme>(
+            find.ancestor(
+              of: find.text('Product news'),
+              matching: find.byType(Theme),
+            ),
+          )
+          .firstWhere(
+            (theme) => theme.data.colorScheme.primary == projectPrimary,
+          );
+      expect(projectTheme.data.colorScheme.primary, projectPrimary);
+    },
+  );
+
+  testWidgets(
     'preference mutation state follows its stable key after server reorder',
     (tester) async {
       platform.deferSubscriptionEdits = true;

@@ -1020,9 +1020,45 @@ PreferenceCenterSnapshot _preferenceCenter(JsonMap value) =>
       key: value['key']! as String,
       displayName: value['displayName']! as String,
       description: value['description'] as String?,
+      projectStyle: value['projectStyle'] == null
+          ? null
+          : _preferenceCenterProjectStyle(_map(value['projectStyle'])),
       sections: _list(value['sections'])
           .map((section) => _preferenceSection(_map(section)))
           .toList(growable: false),
+    );
+
+PreferenceCenterProjectStyle _preferenceCenterProjectStyle(JsonMap value) =>
+    PreferenceCenterProjectStyle(
+      policy: _enumByWire(
+        PreferenceCenterStylePolicy.values,
+        value['policy']! as String,
+      ),
+      fallbackModeKey: value['fallbackModeKey']! as String,
+      fixedModeKey: value['fixedModeKey'] as String?,
+      lightModeKey: value['lightModeKey'] as String?,
+      darkModeKey: value['darkModeKey'] as String?,
+      designTokenVersion: (value['designTokenVersion'] as num).toInt(),
+      modes: _map(value['modes']).map(
+        (key, rawColors) =>
+            MapEntry(key, _preferenceCenterColorScheme(_map(rawColors))),
+      ),
+    );
+
+PreferenceCenterColorScheme _preferenceCenterColorScheme(JsonMap value) =>
+    PreferenceCenterColorScheme(
+      primary: (value['primary'] as num?)?.toInt(),
+      onPrimary: (value['onPrimary'] as num?)?.toInt(),
+      primaryContainer: (value['primaryContainer'] as num?)?.toInt(),
+      onPrimaryContainer: (value['onPrimaryContainer'] as num?)?.toInt(),
+      surface: (value['surface'] as num?)?.toInt(),
+      surfaceContainerLow: (value['surfaceContainerLow'] as num?)?.toInt(),
+      surfaceContainer: (value['surfaceContainer'] as num?)?.toInt(),
+      onSurface: (value['onSurface'] as num?)?.toInt(),
+      onSurfaceVariant: (value['onSurfaceVariant'] as num?)?.toInt(),
+      outlineVariant: (value['outlineVariant'] as num?)?.toInt(),
+      error: (value['error'] as num?)?.toInt(),
+      onError: (value['onError'] as num?)?.toInt(),
     );
 
 PreferenceSection _preferenceSection(JsonMap value) => PreferenceSection(

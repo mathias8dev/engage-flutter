@@ -210,6 +210,32 @@ internal fun PreferenceCenterSnapshot.toFlutter(): FlutterMap = mapOf(
     "key" to key,
     "displayName" to displayName,
     "description" to description,
+    "projectStyle" to projectStyle?.let { style ->
+        mapOf(
+            "policy" to style.policy.name,
+            "fallbackModeKey" to style.fallbackModeKey,
+            "fixedModeKey" to style.fixedModeKey,
+            "lightModeKey" to style.lightModeKey,
+            "darkModeKey" to style.darkModeKey,
+            "designTokenVersion" to style.designTokenVersion,
+            "modes" to style.modes.mapValues { (_, colors) ->
+                mapOf(
+                    "primary" to colors.primary.toFlutterColor(),
+                    "onPrimary" to colors.onPrimary.toFlutterColor(),
+                    "primaryContainer" to colors.primaryContainer.toFlutterColor(),
+                    "onPrimaryContainer" to colors.onPrimaryContainer.toFlutterColor(),
+                    "surface" to colors.surface.toFlutterColor(),
+                    "surfaceContainerLow" to colors.surfaceContainerLow.toFlutterColor(),
+                    "surfaceContainer" to colors.surfaceContainer.toFlutterColor(),
+                    "onSurface" to colors.onSurface.toFlutterColor(),
+                    "onSurfaceVariant" to colors.onSurfaceVariant.toFlutterColor(),
+                    "outlineVariant" to colors.outlineVariant.toFlutterColor(),
+                    "error" to colors.error.toFlutterColor(),
+                    "onError" to colors.onError.toFlutterColor(),
+                ).filterValues { it != null }
+            },
+        )
+    },
     "sections" to sections.map { section ->
         mapOf(
             "key" to section.key,
@@ -227,6 +253,8 @@ internal fun PreferenceCenterSnapshot.toFlutter(): FlutterMap = mapOf(
         )
     },
 )
+
+private fun Int?.toFlutterColor(): Long? = this?.toLong()?.and(0xffffffffL)
 
 internal fun InboxPagerState.toFlutter(): FlutterMap = mapOf(
     "entries" to entries.map(InboxEntry::toFlutter),

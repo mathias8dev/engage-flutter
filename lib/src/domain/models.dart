@@ -339,12 +339,67 @@ final class PreferenceCenterSnapshot {
     required this.displayName,
     required this.sections,
     this.description,
+    this.projectStyle,
   });
 
   final String key;
   final String displayName;
   final String? description;
   final List<PreferenceSection> sections;
+  final PreferenceCenterProjectStyle? projectStyle;
+}
+
+enum PreferenceCenterStylePolicy { system, fixed }
+
+final class PreferenceCenterColorScheme {
+  const PreferenceCenterColorScheme({
+    this.primary,
+    this.onPrimary,
+    this.primaryContainer,
+    this.onPrimaryContainer,
+    this.surface,
+    this.surfaceContainerLow,
+    this.surfaceContainer,
+    this.onSurface,
+    this.onSurfaceVariant,
+    this.outlineVariant,
+    this.error,
+    this.onError,
+  });
+
+  final int? primary;
+  final int? onPrimary;
+  final int? primaryContainer;
+  final int? onPrimaryContainer;
+  final int? surface;
+  final int? surfaceContainerLow;
+  final int? surfaceContainer;
+  final int? onSurface;
+  final int? onSurfaceVariant;
+  final int? outlineVariant;
+  final int? error;
+  final int? onError;
+}
+
+/// Immutable project theme compiled when the Preference Center is published.
+final class PreferenceCenterProjectStyle {
+  const PreferenceCenterProjectStyle({
+    required this.policy,
+    required this.fallbackModeKey,
+    required this.modes,
+    required this.designTokenVersion,
+    this.fixedModeKey,
+    this.lightModeKey,
+    this.darkModeKey,
+  });
+
+  final PreferenceCenterStylePolicy policy;
+  final String fallbackModeKey;
+  final String? fixedModeKey;
+  final String? lightModeKey;
+  final String? darkModeKey;
+  final Map<String, PreferenceCenterColorScheme> modes;
+  final int designTokenVersion;
 }
 
 enum PreferenceCenterResourceStatus { loading, success, error }
