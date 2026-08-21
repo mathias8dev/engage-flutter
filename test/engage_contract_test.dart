@@ -729,7 +729,9 @@ void main() {
   test(
     'overlay decisions cross the bridge without exposing rendering data',
     () async {
+      late InAppContent received;
       Engage.inApp.overlays.displayDelegate = (candidate) {
+        received = candidate;
         expect(candidate.payload, {'step': 'payment'});
         return DisplayDecision.defer;
       };
@@ -741,6 +743,14 @@ void main() {
           'variantId': 'variant-a',
           'type': 'SCENE',
           'payload': {'step': 'payment'},
+          'automation': {
+            'automationId': 'automation-1',
+            'automationVersion': 3,
+            'runId': 'run-1',
+            'nodeId': 'node-1',
+            'experienceVersion': 5,
+            'outcomeKeys': ['accepted', 'declined'],
+          },
           'presentation': {
             'kind': 'OVERLAY',
             'format': 'MODAL',
@@ -754,6 +764,24 @@ void main() {
       });
 
       expect(response, 'DEFER');
+      expect(received.automation?.runId, 'run-1');
+      expect(received.automation?.outcomeKeys, {'accepted', 'declined'});
+
+      platform.responses['inApp.trackOutcome'] = true;
+      expect(
+        await Engage.inApp.trackOutcome(
+          received,
+          'accepted',
+          properties: {'plan': 'pro'},
+        ),
+        isTrue,
+      );
+      expect(platform.invocations.single.method, 'inApp.trackOutcome');
+      expect(platform.invocations.single.arguments, {
+        'messageId': 'message-1',
+        'key': 'accepted',
+        'properties': {'plan': 'pro'},
+      });
     },
   );
 }

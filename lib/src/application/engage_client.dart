@@ -613,6 +613,20 @@ final class InAppApi {
     });
   }
 
+  Future<bool> trackOutcome(
+    InAppContent content,
+    String key, {
+    JsonMap properties = const {},
+  }) async {
+    validateProductKey(key, label: 'outcome key');
+    return (await _platform.invoke('inApp.trackOutcome', {
+          'messageId': content.messageId,
+          'key': key,
+          'properties': properties,
+        }))
+        as bool;
+  }
+
   void _updatePlacement(String key, Object? value) {
     _placements[key]?.set(value == null ? null : _inAppContent(_map(value)));
     EngageLog.info(
@@ -985,7 +999,20 @@ InAppContent _inAppContent(JsonMap value) => InAppContent(
   type: _enumByWire(InAppContentType.values, value['type']! as String),
   payload: _map(value['payload']),
   presentation: _presentation(_map(value['presentation'])),
+  automation: value['automation'] == null
+      ? null
+      : _inAppAutomationContext(_map(value['automation'])),
 );
+
+InAppAutomationContext _inAppAutomationContext(JsonMap value) =>
+    InAppAutomationContext(
+      automationId: value['automationId']! as String,
+      automationVersion: (value['automationVersion']! as num).toInt(),
+      runId: value['runId']! as String,
+      nodeId: value['nodeId']! as String,
+      experienceVersion: (value['experienceVersion']! as num).toInt(),
+      outcomeKeys: _list(value['outcomeKeys']).cast<String>().toSet(),
+    );
 
 PresentationSpec _presentation(JsonMap value) => switch (value['kind']) {
   'OVERLAY' => OverlayPresentation(

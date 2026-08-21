@@ -34,6 +34,7 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.jsonObject
 import java.util.concurrent.ConcurrentHashMap
 import java.util.Locale
 import kotlin.coroutines.resume
@@ -154,6 +155,11 @@ public class EngageFlutterPlugin :
                 "inApp.overlays.pause" -> Engage.inApp.overlays.pause()
                 "inApp.overlays.resume" -> Engage.inApp.overlays.resume()
                 "inApp.observePlacement" -> observePlacement(arguments.string("key"))
+                "inApp.trackOutcome" -> Engage.inApp.trackOutcome(
+                    arguments.string("messageId"),
+                    arguments.string("key"),
+                    arguments["properties"].toJsonElement().jsonObject,
+                )
                 "messageCenter.display" -> (arguments["entryId"] as? String)
                     ?.let { Engage.messageCenter.display(InboxEntryId(it)) }
                     ?: Engage.messageCenter.display()
